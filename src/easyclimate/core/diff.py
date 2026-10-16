@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 from .utility import (
-    find_dims_axis,
     transfer_deg2rad,
-    generate_dataset_dispatcher,
     compare_multi_dataarray_coordinate,
 )
 from .units import (
@@ -16,6 +14,7 @@ from .units import (
 )
 import xarray as xr
 import dask
+import dask.array as da
 from typing import Literal
 
 __all__ = [
@@ -36,41 +35,139 @@ __all__ = [
 ]
 
 
-@generate_dataset_dispatcher
+def _ncl_neighbor_difference(block, axis, out_dtype):
+    """Subtract adjacent neighbors; callers discard the two outer halo cells."""
+    result = np.empty(block.shape, dtype=out_dtype)
+    center = [slice(None)] * block.ndim
+    left = center.copy()
+    right = center.copy()
+    center[axis] = slice(1, -1)
+    left[axis] = slice(None, -2)
+    right[axis] = slice(2, None)
+    np.subtract(
+        block[tuple(right)],
+        block[tuple(left)],
+        out=result[tuple(center)],
+        dtype=out_dtype,
+    )
+    return result
+
+
+def _ncl_gradient(data_input, dim, values, cyclic):
+    """Apply NCL secants with one-cell halos and a precomputed 1-D divisor."""
+    steps = np.diff(values)
+    if cyclic:
+        extended = np.concatenate(
+            ([values[0] - steps[0]], values, [values[-1] + steps[-1]])
+        )
+        denominator = extended[2:] - extended[:-2]
+    else:
+        denominator = np.empty(values.size, dtype=np.float64)
+        denominator[0], denominator[-1] = steps[0], steps[-1]
+        denominator[1:-1] = values[2:] - values[:-2]
+
+    axis = data_input.get_axis_num(dim)
+    data = data_input.data
+    # Promote integers before subtraction to avoid unsigned wrap and overflow.
+    out_dtype = np.result_type(
+        data.dtype, np.float64 if data.dtype.kind in "biu" else np.float32
+    )
+    if isinstance(data, da.Array):
+        numerator = da.map_overlap(
+            _ncl_neighbor_difference,
+            data,
+            depth={axis: 1},
+            boundary={axis: "periodic" if cyclic else "nearest"},
+            axis=axis,
+            out_dtype=out_dtype,
+            dtype=out_dtype,
+            meta=np.empty((0,) * data.ndim, dtype=out_dtype),
+        )
+    else:
+        pad_width = [(0, 0)] * data.ndim
+        pad_width[axis] = (1, 1)
+        padded = np.pad(data, pad_width, mode="wrap" if cyclic else "edge")
+        selection = [slice(None)] * data.ndim
+        selection[axis] = slice(1, -1)
+        numerator = _ncl_neighbor_difference(padded, axis, out_dtype)[tuple(selection)]
+
+    spacing = xr.DataArray(
+        denominator,
+        dims=dim,
+        coords={dim: data_input[dim]} if dim in data_input.coords else None,
+    )
+    result = data_input.copy(data=numerator, deep=False) / spacing
+    result.name = data_input.name
+    return result
+
+
 def calc_gradient(
     data_input: xr.DataArray | xr.Dataset,
     dim: str,
-    varargs: int = 1,
+    varargs: float | np.ndarray | xr.DataArray = 1,
     edge_order: int = 2,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Compute the gradient along the coordinate `dim` direction.
 
-    The gradient is computed using **second order accurate central differences** in the interior points
+    By default, the gradient uses **second order accurate central differences** in the interior points
     and either first or second order accurate one-sides (forward or backwards) differences at the boundaries.
     The returned gradient hence has the same shape as the input array.
 
     Parameters
     ----------
     data_input : :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`.
-         The spatio-temporal data to be calculated.
+        The spatio-temporal data to be calculated. For a Dataset, only variables
+        containing ``dim`` are differentiated; other variables are omitted.
+        All coordinates are retained. An error is raised if no variables
+        contain ``dim`` or a selected variable cannot be differentiated.
     dim : :py:class:`str <str>`.
-        Dimension(s) over which to apply gradient. By default gradient is applied over the `time` dimension.
-    varargs: :py:class:`list <list>` of scalar or array, optional
-        Spacing between f values. Default unitary spacing for all dimensions. Spacing can be specified using:
-
-        1. Single scalar to specify a sample distance for all dimensions.
-        2. N scalars to specify a constant sample distance for each dimension. i.e. :math:`\\mathrm{d}x, \\mathrm{d}y, \\mathrm{d}z, ...`
-        3. N arrays to specify the coordinates of the values along each dimension of F.
-           The length of the array must match the size of the corresponding dimension.
-        4. Any combination of N scalars/arrays with the meaning of 2. and 3.
+        Dimension over which to compute the gradient.
+    varargs : scalar or one-dimensional array, optional
+        Constant spacing or coordinate values along ``dim``. Default: 1.
+        A coordinate array must match the size of ``dim``. To differentiate
+        using the dimension's coordinate values, pass ``data_input[dim]``.
 
     edge_order: {1, 2}, optional
-        Gradient is calculated using N-th order accurate differences at the boundaries. Default: 2.
+        Boundary accuracy for ``method="numpy"``. Ignored for ``method="ncl"``,
+        which always uses first-order one-sided nonperiodic endpoints. Default: 2.
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm. ``"numpy"`` retains :func:`numpy.gradient`.
+        ``"ncl"`` uses the neighboring-point secant of NCL
+        ``center_finite_diff_n`` with scalar spacing or a one-dimensional
+        coordinate array supplied through ``varargs``. Requires at least three
+        points with finite, strictly monotonic coordinate values.
+
+        .. note::
+
+            On nonuniform coordinates, the NCL interior derivative is
+            ``(f[i+1] - f[i-1]) / (x[i+1] - x[i-1])``. It differs from
+            NumPy's weighted nonuniform-grid formula and is not generally
+            second-order accurate there. Nonperiodic endpoints use one-sided
+            differences regardless of ``edge_order``. See the
+            `NCL documentation <https://www.ncl.ucar.edu/Document/Functions/Built-in/center_finite_diff_n.shtml>`_.
+    cyclic : bool, default False
+        Treat the differentiated dimension as periodic for ``method="ncl"``.
+        Do not include a duplicate cyclic endpoint. Boundary coordinate spacing
+        is extended using the first and last adjacent spacings, as in NCL.
+        ``True`` is unsupported for ``method="numpy"``.
 
     Returns
     -------
     The gradient along the coordinate `dim` direction (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
+
+    Notes
+    -----
+    NCL differences use a precomputed one-dimensional denominator. Dask inputs
+    remain lazy and exchange one neighboring cell per block using
+    :func:`dask.array.map_overlap`; the differentiation axis need not be a
+    single chunk. Avoid very small chunks to limit halo overhead. Floating
+    inputs retain their subtraction precision; integer inputs are promoted
+    to float64 before subtraction. Division uses float64 coordinate spacing.
+    NumPy differences retain NumPy/Dask's gradient rules, including minimum
+    chunk sizes of ``edge_order + 1`` along the differentiated axis.
 
     .. seealso::
         :py:func:`numpy.gradient <numpy:numpy.gradient>`
@@ -81,15 +178,48 @@ def calc_gradient(
         geographic_finite_difference
     """
 
-    def _calc_gradient(data_input, dim, varargs, edge_order) -> xr.DataArray:
-        dim_index = find_dims_axis(data_input, dim=dim)
-        # `data_input.data` make dask to process Dask.array
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+    if isinstance(data_input, xr.Dataset):
+        variables = {
+            name: calc_gradient(variable, dim, varargs, edge_order, method, cyclic)
+            for name, variable in data_input.data_vars.items()
+            if dim in variable.dims
+        }
+        if not variables:
+            raise ValueError(f"No variables contain dimension {dim!r}.")
+        return xr.Dataset(variables, coords=data_input.coords, attrs={})
+    if not isinstance(data_input, xr.DataArray):
+        raise ValueError("Unsupported input type. Expected DataArray or Dataset.")
+    if dim not in data_input.dims:
+        raise ValueError(f"Dimension {dim!r} not found.")
+    if method == "numpy":
         data_gradient = np.gradient(
-            data_input.data, varargs, axis=dim_index, edge_order=edge_order
+            data_input.data,
+            varargs,
+            axis=data_input.get_axis_num(dim),
+            edge_order=edge_order,
         )
-        return data_input.copy(data=data_gradient, deep=True)
-
-    result = _calc_gradient(data_input, dim, varargs, edge_order)
+        result = data_input.copy(data=data_gradient, deep=False)
+    else:
+        values = np.asarray(varargs, dtype=float)
+        size = data_input.sizes[dim]
+        if values.ndim == 0:
+            values = np.arange(size, dtype=float) * values
+        if values.ndim != 1 or values.size != size:
+            raise ValueError(
+                "varargs must be scalar spacing or a coordinate array matching dim."
+            )
+        if size < 3 or not np.all(np.isfinite(values)):
+            raise ValueError(
+                f"{dim!r} requires at least three finite coordinate values."
+            )
+        steps = np.diff(values)
+        if not (np.all(steps > 0) or np.all(steps < 0)):
+            raise ValueError(f"{dim!r} must be strictly monotonic.")
+        result = _ncl_gradient(data_input, dim, values, cyclic)
 
     # clean attrs
     result.attrs = dict()
@@ -103,6 +233,8 @@ def calc_dx_gradient(
     min_dx: float = 1.0,
     edge_order: int = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the zonal gradient of the input data in physical units (meters).
@@ -143,6 +275,15 @@ def calc_dx_gradient(
     R: :py:class:`float <float>`, default: `6370000` (:math:`\\mathrm{m}`).
         Radius of the Earth in meters (approximate mean radius). Can be adjusted for specific models.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -160,17 +301,32 @@ def calc_dx_gradient(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lon_array = data_input[lon_dim].astype("float64")
     lat_array = data_input[lat_dim].astype("float64")
-    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim))
+    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim, method=method))
     coslat = np.cos(transfer_deg2rad(lat_array))
 
     dx = R * coslat * dlon
     dx = dx.where(np.abs(dx) >= min_dx)
 
-    dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
-    dFdx = dFdx_raw / dx
+    if method == "ncl":
+        dFdx = calc_gradient(
+            data_input,
+            dim=lon_dim,
+            varargs=transfer_deg2rad(lon_array),
+            method=method,
+            cyclic=cyclic,
+        ) / (R * coslat)
+        dFdx = dFdx.where(dx.notnull())
+    else:
+        dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
+        dFdx = dFdx_raw / dx
     dFdx = dFdx.astype("float32")
 
     # Add attributes for clarity
@@ -207,6 +363,8 @@ def calc_dlon_radian_gradient(
     data_input: xr.DataArray | xr.Dataset,
     lon_dim: str = "lon",
     edge_order: int = 2,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the gradient of the input data with respect to longitude in radians.
@@ -235,6 +393,15 @@ def calc_dlon_radian_gradient(
         Order of the finite difference used at the boundaries. 1 uses first-order accurate
         one-sided differences; 2 uses second-order accurate one-sided differences. Default: 2.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -242,12 +409,27 @@ def calc_dlon_radian_gradient(
         and coordinates as the input. Units are inherited from the input data divided by radians
         (e.g., if F is in K, output is K/rad).
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lon_array = data_input[lon_dim].astype("float64")
-    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim))
+    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim, method=method))
 
-    dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
-    dFdx = dFdx_raw / dlon
+    if method == "ncl":
+        dFdx = calc_gradient(
+            data_input,
+            dim=lon_dim,
+            varargs=transfer_deg2rad(lon_array),
+            method=method,
+            cyclic=cyclic,
+        )
+        dFdx = dFdx.where(dlon.notnull())
+    else:
+        dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
+        dFdx = dFdx_raw / dlon
     dFdx = dFdx.astype("float32")
 
     # Add attributes for clarity
@@ -280,6 +462,8 @@ def calc_dlon_degree_gradient(
     data_input: xr.DataArray | xr.Dataset,
     lon_dim: str = "lon",
     edge_order: int = 2,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the gradient of the input data with respect to longitude in degrees.
@@ -308,6 +492,15 @@ def calc_dlon_degree_gradient(
         Order of the finite difference used at the boundaries. 1 uses first-order accurate
         one-sided differences; 2 uses second-order accurate one-sided differences. Default: 2.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -325,12 +518,27 @@ def calc_dlon_degree_gradient(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lon_array = data_input[lon_dim].astype("float64")
-    dlon = calc_gradient(lon_array, dim=lon_dim)
+    dlon = calc_gradient(lon_array, dim=lon_dim, method=method)
 
-    dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
-    dFdx = dFdx_raw / dlon
+    if method == "ncl":
+        dFdx = calc_gradient(
+            data_input,
+            dim=lon_dim,
+            varargs=lon_array,
+            method=method,
+            cyclic=cyclic,
+        )
+        dFdx = dFdx.where(dlon.notnull())
+    else:
+        dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
+        dFdx = dFdx_raw / dlon
     dFdx = dFdx.astype("float32")
 
     # Add attributes for clarity
@@ -365,6 +573,8 @@ def calc_dy_gradient(
     min_dy: float = 1.0,
     edge_order: int = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the meridional gradient of the input data in physical units (meters).
@@ -402,6 +612,15 @@ def calc_dy_gradient(
     R: :py:class:`float <float>`, default: `6370000`.
         Radius of the Earth in meters (approximate mean radius). Can be adjusted for specific models.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -419,14 +638,29 @@ def calc_dy_gradient(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lat_array = data_input[lat_dim].astype("float64")
-    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim))
+    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim, method=method))
     dy = R * dlat
     dy = dy.where(np.abs(dy) >= min_dy)
 
-    dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
-    dFdy = dFdy_raw / dy
+    if method == "ncl":
+        dFdy = calc_gradient(
+            data_input,
+            dim=lat_dim,
+            varargs=transfer_deg2rad(lat_array),
+            method=method,
+            cyclic=cyclic,
+        ) / (R)
+        dFdy = dFdy.where(dy.notnull())
+    else:
+        dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
+        dFdy = dFdy_raw / dy
     dFdy = dFdy.astype("float32")
 
     # Add attributes for clarity
@@ -463,6 +697,8 @@ def calc_dlat_radian_gradient(
     data_input: xr.DataArray | xr.Dataset,
     lat_dim: str = "lat",
     edge_order: int = 2,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the gradient of the input data with respect to latitude in radians.
@@ -491,6 +727,15 @@ def calc_dlat_radian_gradient(
         Order of the finite difference used at the boundaries. 1 uses first-order accurate
         one-sided differences; 2 uses second-order accurate one-sided differences. Default: 2.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -508,12 +753,27 @@ def calc_dlat_radian_gradient(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lat_array = data_input[lat_dim].astype("float64")
-    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim))
+    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim, method=method))
 
-    dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
-    dFdy = dFdy_raw / dlat
+    if method == "ncl":
+        dFdy = calc_gradient(
+            data_input,
+            dim=lat_dim,
+            varargs=transfer_deg2rad(lat_array),
+            method=method,
+            cyclic=cyclic,
+        )
+        dFdy = dFdy.where(dlat.notnull())
+    else:
+        dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
+        dFdy = dFdy_raw / dlat
     dFdy = dFdy.astype("float32")
 
     # Add attributes for clarity
@@ -544,6 +804,8 @@ def calc_dlat_degree_gradient(
     data_input: xr.DataArray | xr.Dataset,
     lat_dim: str = "lat",
     edge_order: int = 2,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculate the gradient of the input data with respect to latitude in degrees.
@@ -572,6 +834,15 @@ def calc_dlat_degree_gradient(
         Order of the finite difference used at the boundaries. 1 uses first-order accurate
         one-sided differences; 2 uses second-order accurate one-sided differences. Default: 2.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     :py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`
@@ -589,12 +860,27 @@ def calc_dlat_degree_gradient(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lat_array = data_input[lat_dim].astype("float64")
-    dlat = calc_gradient(lat_array, dim=lat_dim)
+    dlat = calc_gradient(lat_array, dim=lat_dim, method=method)
 
-    dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
-    dFdy = dFdy_raw / dlat
+    if method == "ncl":
+        dFdy = calc_gradient(
+            data_input,
+            dim=lat_dim,
+            varargs=lat_array,
+            method=method,
+            cyclic=cyclic,
+        )
+        dFdy = dFdy.where(dlat.notnull())
+    else:
+        dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
+        dFdy = dFdy_raw / dlat
     dFdy = dFdy.astype("float32")
 
     # Add attributes for clarity
@@ -628,6 +914,8 @@ def calc_dx_laplacian(
     min_dx2: float = 1e9,
     edge_order: int = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculation of the second-order partial derivative term (Laplace term) along longitude.
@@ -651,6 +939,15 @@ def calc_dx_laplacian(
     R: :py:class:`float <float>`, default: `6370000`.
         Radius of the Earth.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The second-order partial derivative term (Laplace term) along longitude (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
@@ -663,20 +960,35 @@ def calc_dx_laplacian(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # Set to `float64` for more accurate results in trigonometric calculations.
     lon_array = data_input[lon_dim].astype("float64")
     lat_array = data_input[lat_dim].astype("float64")
 
-    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim))
+    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim, method=method))
     # The purpose of this calculation is to compute the trigonometric function only once and reduce the computational error.
     # cos^2(x)= ( 1+cos(2x) ) /2
     cos2lat = (np.cos(2.0 * transfer_deg2rad(lat_array)) + 1.0) / 2.0
     dx2 = (dlon * R) ** 2 * cos2lat
     dx2 = dx2.where(dx2 >= min_dx2)
 
-    dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
-    d2Fdx2_raw = calc_gradient(dFdx_raw, dim=lon_dim, edge_order=edge_order)
-    d2Fdx2 = d2Fdx2_raw / dx2
+    if method == "ncl":
+        coordinate = transfer_deg2rad(lon_array)
+        first = calc_gradient(
+            data_input, lon_dim, coordinate, method=method, cyclic=cyclic
+        )
+        d2Fdx2 = calc_gradient(
+            first, lon_dim, coordinate, method=method, cyclic=cyclic
+        ) / (R**2 * cos2lat)
+        d2Fdx2 = d2Fdx2.where(dx2.notnull())
+    else:
+        dFdx_raw = calc_gradient(data_input, dim=lon_dim, edge_order=edge_order)
+        d2Fdx2_raw = calc_gradient(dFdx_raw, dim=lon_dim, edge_order=edge_order)
+        d2Fdx2 = d2Fdx2_raw / dx2
     return d2Fdx2
 
 
@@ -686,6 +998,8 @@ def calc_dy_laplacian(
     min_dy2: float = 1.0,
     edge_order: int = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculation of the second-order partial derivative term (Laplace term) along latitude.
@@ -707,6 +1021,15 @@ def calc_dy_laplacian(
     R: :py:class:`float <float>`, default: `6370000`.
         Radius of the Earth.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The second-order partial derivative term (Laplace term) along latitude (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
@@ -719,15 +1042,31 @@ def calc_dy_laplacian(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     lat_array = data_input[lat_dim].astype("float64")
 
-    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim))
+    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim, method=method))
     dy2 = (R * dlat) ** 2
     dy2 = dy2.where(dy2 >= min_dy2)
 
-    dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
-    d2Fdy2_raw = calc_gradient(dFdy_raw, dim=lat_dim, edge_order=edge_order)
-    d2Fdy2 = d2Fdy2_raw / dy2
+    if method == "ncl":
+        coordinate = transfer_deg2rad(lat_array)
+        first = calc_gradient(
+            data_input, lat_dim, coordinate, method=method, cyclic=cyclic
+        )
+        d2Fdy2 = (
+            calc_gradient(first, lat_dim, coordinate, method=method, cyclic=cyclic)
+            / R**2
+        )
+        d2Fdy2 = d2Fdy2.where(dy2.notnull())
+    else:
+        dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
+        d2Fdy2_raw = calc_gradient(dFdy_raw, dim=lat_dim, edge_order=edge_order)
+        d2Fdy2 = d2Fdy2_raw / dy2
     return d2Fdy2
 
 
@@ -738,6 +1077,8 @@ def calc_dxdy_mixed_derivatives(
     min_dxdy: float = 1e10,
     edge_order: int = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray | xr.Dataset:
     """
     Calculation of second-order mixed partial derivative terms along longitude and latitude.
@@ -761,6 +1102,15 @@ def calc_dxdy_mixed_derivatives(
     R: :py:class:`float <float>`, default: `6370000`.
         Radius of the Earth.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The second-order mixed partial derivative terms along longitude and latitude (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
@@ -773,18 +1123,32 @@ def calc_dxdy_mixed_derivatives(
 
         geographic_finite_difference
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     lon_array = data_input[lon_dim].astype("float64")
     lat_array = data_input[lat_dim].astype("float64")
 
-    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim))
-    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim))
+    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim, method=method))
+    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim, method=method))
     coslat = np.cos(transfer_deg2rad(lat_array))
     dxdy = R**2 * coslat * dlon * dlat
     dxdy = dxdy.where(np.abs(dxdy) >= min_dxdy)
 
-    dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
-    d2Fdxy_raw = calc_gradient(dFdy_raw, dim=lon_dim, edge_order=edge_order)
-    d2Fdxy = d2Fdxy_raw / dxdy
+    if method == "ncl":
+        first = calc_gradient(
+            data_input, lat_dim, transfer_deg2rad(lat_array), method=method
+        )
+        d2Fdxy = calc_gradient(
+            first, lon_dim, transfer_deg2rad(lon_array), method=method, cyclic=cyclic
+        ) / (R**2 * coslat)
+        d2Fdxy = d2Fdxy.where(dxdy.notnull())
+    else:
+        dFdy_raw = calc_gradient(data_input, dim=lat_dim, edge_order=edge_order)
+        d2Fdxy_raw = calc_gradient(dFdy_raw, dim=lon_dim, edge_order=edge_order)
+        d2Fdxy = d2Fdxy_raw / dxdy
     return d2Fdxy
 
 
@@ -792,6 +1156,8 @@ def calc_p_gradient(
     data_input: xr.DataArray,
     vertical_dim: str,
     vertical_dim_units: Literal["hPa", "Pa", "mbar"],
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray:
     """
     Calculate the gradient along the barometric pressure direction in the p-coordinate system.
@@ -808,6 +1174,15 @@ def calc_p_gradient(
     vertical_dim_units: :py:class:`str <str>`.
         The unit corresponding to the vertical p-coordinate value. Optional values are `hPa`, `Pa`, `mbar`.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The gradient along the barometric pressure direction in the p-coordinate system (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
@@ -815,6 +1190,11 @@ def calc_p_gradient(
     .. seealso::
         :py:func:`calc_gradient <calc_gradient>`
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     # top → bottom
     data_input = data_input.sortby(vertical_dim, ascending=True)
 
@@ -825,8 +1205,20 @@ def calc_p_gradient(
     # Convert the pressure unit to Pascal
     dp_base = transfer_units_coeff(vertical_dim_units, "Pa")
 
-    dp = calc_gradient(data_input[vertical_dim], dim=vertical_dim) * dp_base
-    dF_dp = calc_gradient(data_input, dim=vertical_dim) / dp
+    dp = (
+        calc_gradient(data_input[vertical_dim], dim=vertical_dim, method=method)
+        * dp_base
+    )
+    if method == "ncl":
+        dF_dp = calc_gradient(
+            data_input,
+            vertical_dim,
+            data_input[vertical_dim] * dp_base,
+            method=method,
+            cyclic=cyclic,
+        )
+    else:
+        dF_dp = calc_gradient(data_input, dim=vertical_dim) / dp
 
     # clean other attrs
     if "units" in data_input.attrs:
@@ -843,6 +1235,8 @@ def calc_time_gradient(
     data_input: xr.DataArray,
     time_units: str,
     time_dim: str = "time",
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray:
     """
     Calculate the gradient along the time direction.
@@ -859,6 +1253,15 @@ def calc_time_gradient(
     time_dim: :py:class:`str <str>`, default: `time`.
         The time coordinate dimension name.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to the differentiated dimension.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The gradient along the time direction (:py:class:`xarray.DataArray<xarray.DataArray>` or :py:class:`xarray.Dataset<xarray.Dataset>`).
@@ -868,13 +1271,18 @@ def calc_time_gradient(
     .. seealso::
         :py:func:`calc_gradient <calc_gradient>`
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     if isinstance(data_input.data, dask.array.core.Array):
         # The vertical coordinate dimension is set to no chunking
         data_input = data_input.chunk({time_dim: -1})
 
     # Convert time units to seconds
     dt = transfer_units_coeff(time_units, "seconds")
-    dFdt = calc_gradient(data_input, dim=time_dim) / dt
+    dFdt = calc_gradient(data_input, dim=time_dim, method=method, cyclic=cyclic) / dt
     dFdt.attrs["units"] = "s^-1"
     return dFdt
 
@@ -885,6 +1293,8 @@ def calc_dxdy_laplacian(
     lat_dim: str = "lat",
     R: float = 6371200.0,
     spherical_coord: bool = True,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ) -> xr.DataArray:
     """
     Calculate the horizontal Laplace term.
@@ -912,12 +1322,47 @@ def calc_dxdy_laplacian(
     spherical_coord: :py:class:`bool <bool>`, default: `True`.
         Whether or not to compute the horizontal Laplace term in spherical coordinates.
 
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
     Returns
     -------
     The horizontal Laplace term. (:py:class:`xarray.DataArray<xarray.DataArray>`).
     """
-    dlon = transfer_deg2rad(calc_gradient(data_input[lon_dim], dim=lon_dim))
-    dlat = transfer_deg2rad(calc_gradient(data_input[lat_dim], dim=lat_dim))
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
+    if method == "ncl":
+        longitude = transfer_deg2rad(data_input[lon_dim].astype("float64"))
+        latitude = transfer_deg2rad(data_input[lat_dim].astype("float64"))
+        coslat = np.cos(latitude)
+        dlon_first = calc_gradient(
+            data_input, lon_dim, longitude, method=method, cyclic=cyclic
+        )
+        dlat_first = calc_gradient(data_input, lat_dim, latitude, method=method)
+        laplacian = (
+            calc_gradient(dlon_first, lon_dim, longitude, method=method, cyclic=cyclic)
+            / (R * coslat) ** 2
+            + calc_gradient(dlat_first, lat_dim, latitude, method=method) / R**2
+        )
+        if spherical_coord:
+            laplacian = laplacian - dlat_first * np.tan(latitude) / R**2
+        return laplacian
+
+    dlon = transfer_deg2rad(
+        calc_gradient(data_input[lon_dim], dim=lon_dim, method=method)
+    )
+    dlat = transfer_deg2rad(
+        calc_gradient(data_input[lat_dim], dim=lat_dim, method=method)
+    )
     coslat = np.cos(transfer_deg2rad(data_input[lat_dim]))
     dx = R * coslat * dlon
     dy = R * dlat
@@ -946,33 +1391,73 @@ def calc_shear_stretch_deform(
     lat_dim: str = "lat",
     edge_order: {1, 2} = 2,
     R: float = 6371200.0,
+    method: Literal["numpy", "ncl"] = "numpy",
+    cyclic: bool = False,
 ):
     """
+    Parameters
+    ----------
+    method : {"numpy", "ncl"}, default "numpy"
+        Finite-difference algorithm passed to :func:`calc_gradient`.
+        NCL uses neighboring-point secants and first-order nonperiodic
+        endpoints; ``edge_order`` does not affect the NCL calculation.
+    cyclic : bool, default False
+        Periodic differences for ``method="ncl"``; unsupported with NumPy.
+        Applies to longitude only; latitude remains nonperiodic.
+        The coordinate must omit a duplicate cyclic endpoint.
+
+    References
+    ----------
     - https://www.ncl.ucar.edu/Document/Functions/Contributed/shear_stretch_deform_cfd.shtml
     - Spensberger, C., & Spengler, T. (2014). A New Look at Deformation as a Diagnostic for Large-Scale Flow. Journal of the Atmospheric Sciences, 71(11), 4221-4234. https://doi.org/10.1175/JAS-D-14-0108.1
     """
+    if method not in ("numpy", "ncl"):
+        raise ValueError("method must be 'numpy' or 'ncl'.")
+    if cyclic and method != "ncl":
+        raise ValueError("cyclic=True requires method='ncl'.")
+
     compare_multi_dataarray_coordinate([u_data, v_data])
 
     lon_array = u_data[lon_dim].astype("float64")
     lat_array = u_data[lat_dim].astype("float64")
-    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim))
-    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim))
+    dlon = transfer_deg2rad(calc_gradient(lon_array, dim=lon_dim, method=method))
+    dlat = transfer_deg2rad(calc_gradient(lat_array, dim=lat_dim, method=method))
     coslat = np.cos(transfer_deg2rad(lat_array))
 
     dx = R * coslat * dlon
     dy = R * dlat
 
-    dudx_raw = calc_gradient(u_data, dim=lon_dim, edge_order=edge_order)
-    dudx = dudx_raw / dx
+    if method == "ncl":
+        dudx = calc_gradient(
+            u_data, lon_dim, transfer_deg2rad(lon_array), method=method, cyclic=cyclic
+        ) / (R * coslat)
+    else:
+        dudx_raw = calc_gradient(u_data, dim=lon_dim, edge_order=edge_order)
+        dudx = dudx_raw / dx
 
-    dudy_raw = calc_gradient(u_data, dim=lat_dim, edge_order=edge_order)
-    dudy = dudy_raw / dy
+    if method == "ncl":
+        dudy = calc_gradient(
+            u_data, lat_dim, transfer_deg2rad(lat_array), method=method, cyclic=False
+        ) / (R)
+    else:
+        dudy_raw = calc_gradient(u_data, dim=lat_dim, edge_order=edge_order)
+        dudy = dudy_raw / dy
 
-    dvdx_raw = calc_gradient(v_data, dim=lon_dim, edge_order=edge_order)
-    dvdx = dvdx_raw / dx
+    if method == "ncl":
+        dvdx = calc_gradient(
+            v_data, lon_dim, transfer_deg2rad(lon_array), method=method, cyclic=cyclic
+        ) / (R * coslat)
+    else:
+        dvdx_raw = calc_gradient(v_data, dim=lon_dim, edge_order=edge_order)
+        dvdx = dvdx_raw / dx
 
-    dvdy_raw = calc_gradient(v_data, dim=lat_dim, edge_order=edge_order)
-    dvdy = dvdy_raw / dy
+    if method == "ncl":
+        dvdy = calc_gradient(
+            v_data, lat_dim, transfer_deg2rad(lat_array), method=method, cyclic=False
+        ) / (R)
+    else:
+        dvdy_raw = calc_gradient(v_data, dim=lat_dim, edge_order=edge_order)
+        dvdy = dvdy_raw / dy
 
     shear = dvdx + dudy
     stretch = dudx - dvdy

@@ -1,5 +1,5 @@
 # src/easyclimate/version.py
-__version__ = "2026.8.1"
+__version__ = "2026.11.0"
 
 
 def show_versions() -> str:

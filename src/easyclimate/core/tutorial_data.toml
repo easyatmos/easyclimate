@@ -63,6 +63,7 @@
 "vwnd_day_ltm_1991_2020_0to6day" = 4
 "wrfout_d01_2022-05-01_00_00_00" = 4
 "x1_2562_grid" = 4
+"tn_waf_era5_202502_sample" = 4
 
 [tutorial_hashes]
 "PressQFF_202007271200_872.csv" = "md5:88359c832dd5dea1c2b0004ee6930a89"
@@ -124,6 +125,7 @@
 "vwnd_day_ltm_1991_2020_0to6day.nc" = "md5:2842b468eeaa5781d6272ab6f4a087df"
 "wrfout_d01_2022-05-01_00_00_00.nc" = "md5:bb541b0d726a335ae4dbcc9e322cb06b"
 "x1_2562_grid.nc" = "md5:0af415d5c97e70073c56430eb708d795"
+"tn_waf_era5_202502_sample" = "md5:3fa927103aa6786c2eb9e8000d762d0b"
 
 [external_urls]
 

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 __all__ = ["open_tutorial_dataset"]
 
 _default_cache_dir_name = "easylimate_tutorial_data"
-base_url = "https://github.com/shenyulu/easyclimate-tutorial"
+base_url = "https://github.com/easyatmos/easyclimate-tutorial"
 version = "main"
 download_retries = 3
 _known_hash_cache = {}
