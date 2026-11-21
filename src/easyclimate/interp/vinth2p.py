@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
-from ..backend import _vinth2p_dp, _vinth2p_ecmwf, _vintp2p_ecmwf
+from .. import backend as _backend
 from ..core.utility import compare_multi_dataarray_coordinate
 from ..core.units import transfer_data_multiple_units
 from typing import Literal, Optional
@@ -245,7 +245,7 @@ def interp_vinth2p_dp(
         nlevo = plevo.shape[0]
 
         # Call the Fortran subroutine and get dato directly
-        dato = _vinth2p_dp(
+        dato = _backend._vinth2p_dp(
             dati,
             hbcofa,
             hbcofb,
@@ -617,7 +617,7 @@ def interp_vinth2p_ecmwf(
         nlevo = plevo.shape[0]
 
         # Call the Fortran subroutine
-        dato = _vinth2p_ecmwf(
+        dato = _backend._vinth2p_ecmwf(
             dati,
             hbcofa,
             hbcofb,
@@ -1019,7 +1019,7 @@ def interp_vintp2p_ecmwf(
         nlevo = plevo.shape[0]
 
         # Call the Fortran subroutine
-        dato = _vintp2p_ecmwf(
+        dato = _backend._vintp2p_ecmwf(
             dati,
             presi=presi,
             plevi=plevi,

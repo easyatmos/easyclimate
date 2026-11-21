@@ -81,7 +81,7 @@ def test_simulate_converts_backend_result_and_forwards_options(
         calls.append(kwargs)
         return raw_solver_result
 
-    monkeypatch.setattr(api, "gill_simulate", fake_gill_simulate)
+    monkeypatch.setitem(api._backend.__dict__, "gill_simulate", fake_gill_simulate)
 
     result = api.simulate(
         case="gill_asym",

@@ -4,7 +4,7 @@ Regridding
 
 from __future__ import annotations
 
-import easyclimate_backend.xarray_regrid
+from .. import backend as _backend
 import xarray as xr
 import warnings
 from typing import Literal
@@ -69,6 +69,8 @@ def interp_mesh2mesh(
 
         interp
     """
+    _backend.require("xarray_regrid")
+
     target_grid_dims_len = len(target_grid.dims)
     if target_grid_dims_len != 2:
         raise ValueError(

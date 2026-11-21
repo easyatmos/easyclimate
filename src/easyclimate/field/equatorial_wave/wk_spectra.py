@@ -17,7 +17,7 @@ of equatorial wave dispersion relationships.
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
-from ...backend import wk_analysis, matsuno_plot
+from ... import backend as _backend
 
 __all__ = [
     "remove_dominant_signals",
@@ -78,7 +78,7 @@ def remove_dominant_signals(
         wk_spectra
     """
     data = data.transpose(time_dim, lat_dim, lon_dim)
-    result_array = wk_analysis.remove_dominant_signals(
+    result_array = _backend.wk_analysis.remove_dominant_signals(
         data.data, spd, nDayWin, nDaySkip
     )
     return data.copy(deep=True, data=result_array)
@@ -198,24 +198,26 @@ def calc_spectral_coefficients(
     """
     data = data.transpose(time_dim, lat_dim, lon_dim)
 
-    ntim, nlat, nlon, nDayTot, nSampWin, nSampSkip = wk_analysis.sampling_vars(
+    ntim, nlat, nlon, nDayTot, nSampWin, nSampSkip = _backend.wk_analysis.sampling_vars(
         data.data, spd, nDayWin, nDaySkip
     )
-    wavefft, freqfft, peeAS = wk_analysis.spectral_coefficients(
+    wavefft, freqfft, peeAS = _backend.wk_analysis.spectral_coefficients(
         data.data, spd, nDayWin, nDaySkip
     )
 
     # Calculate the power spectrum
     power = (np.abs(peeAS)) ** 2  # power[window,freq,lat,lon]
 
-    psumanti, psumsym = wk_analysis.separate_power(
+    psumanti, psumsym = _backend.wk_analysis.separate_power(
         power, nlat, nSampWin, wavefft, freqfft
     )
 
     # Now derive the background spectrum (red noise)
     # Sum power over all latitude
     # Apply smoothing to the spectrum. This smoothing DOES include wavenumber zero.
-    psumb = wk_analysis.derive_background(power, nlat, nSampWin, wavefft, freqfft)
+    psumb = _backend.wk_analysis.derive_background(
+        power, nlat, nSampWin, wavefft, freqfft
+    )
 
     # Cropping the output
     indwave = np.where(np.logical_and(wavefft >= -max_wn, wavefft <= max_wn))[0]
@@ -324,7 +326,7 @@ def draw_wk_anti_analysis(
 
         wk_spectra
     """
-    matsuno_modes = matsuno_plot.matsuno_modes_wk(
+    matsuno_modes = _backend.matsuno_plot.matsuno_modes_wk(
         he=he, n=meridional_modes, max_wn=max_wn
     )
 
@@ -448,7 +450,7 @@ def draw_wk_sym_analysis(
 
         wk_spectra
     """
-    matsuno_modes = matsuno_plot.matsuno_modes_wk(
+    matsuno_modes = _backend.matsuno_plot.matsuno_modes_wk(
         he=he, n=meridional_modes, max_wn=max_wn
     )
 

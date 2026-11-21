@@ -10,16 +10,7 @@ from typing import Literal
 from ..core.utility import (
     compare_multi_dataarray_coordinate,
 )
-from ..backend import (
-    dvrfidf_ncl,
-    ddvfidf_ncl,
-    ddvfidf_rs,
-    dvrfidf_rs,
-    ddvfidf_batch_rs,
-    dvrfidf_batch_rs,
-    ddvfidf_batch_noreyon_rs,
-    dvrfidf_batch_noreyon_rs,
-)
+from .. import backend as _backend
 
 __all__ = [
     "calc_divergence_rs",
@@ -137,11 +128,6 @@ def calc_divergence_rs(
     v_trans = v_data.transpose(*transpose_order_u)
 
     def _core_batch(u_vals, v_vals, lon_vals, lat_vals, xmsg, R):
-        if method == "rust-batch-noreyon" and ddvfidf_batch_noreyon_rs is None:
-            raise ImportError(
-                "`rust-batch-noreyon` requires an easyclimate_rust build that "
-                "exports the no-Rayon rvdv functions."
-            )
         orig_lat_vals = lat_vals.copy()
         flip_lat = orig_lat_vals[0] > orig_lat_vals[-1]
         if flip_lat:
@@ -159,9 +145,9 @@ def calc_divergence_rs(
         xmsg_rs = float(xmsg) if not np.isnan(xmsg) else np.nan
 
         batch_fn = (
-            ddvfidf_batch_noreyon_rs
+            _backend.ddvfidf_batch_noreyon_rs
             if method == "rust-batch-noreyon"
-            else ddvfidf_batch_rs
+            else _backend.ddvfidf_batch_rs
         )
         dv_out, ier = batch_fn(
             u_batch, v_batch, glat_vals, glon_vals, int(iopt), xmsg_rs, float(R)
@@ -205,7 +191,7 @@ def calc_divergence_rs(
             u_slice = u_batch[idx]
             v_slice = v_batch[idx]
 
-            dv_slice, ier = ddvfidf_rs(
+            dv_slice, ier = _backend.ddvfidf_rs(
                 u_slice, v_slice, glat_vals, glon_vals, int(iopt), xmsg_rs, R
             )
             if ier != 0:
@@ -346,11 +332,6 @@ def calc_vorticity_rs(
     v_trans = v_data.transpose(*transpose_order_u)
 
     def _core_batch(u_vals, v_vals, lon_vals, lat_vals, xmsg, R):
-        if method == "rust-batch-noreyon" and dvrfidf_batch_noreyon_rs is None:
-            raise ImportError(
-                "`rust-batch-noreyon` requires an easyclimate_rust build that "
-                "exports the no-Rayon rvdv functions."
-            )
         orig_lat_vals = lat_vals.copy()
         flip_lat = orig_lat_vals[0] > orig_lat_vals[-1]
         if flip_lat:
@@ -367,9 +348,9 @@ def calc_vorticity_rs(
         xmsg_rs = float(xmsg) if not np.isnan(xmsg) else np.nan
 
         batch_fn = (
-            dvrfidf_batch_noreyon_rs
+            _backend.dvrfidf_batch_noreyon_rs
             if method == "rust-batch-noreyon"
-            else dvrfidf_batch_rs
+            else _backend.dvrfidf_batch_rs
         )
         rv_out, ier = batch_fn(
             u_batch, v_batch, glat_vals, glon_vals, int(iopt), xmsg_rs, float(R)
@@ -409,7 +390,7 @@ def calc_vorticity_rs(
             u_slice = u_batch[idx]
             v_slice = v_batch[idx]
 
-            rv_slice, ier = dvrfidf_rs(
+            rv_slice, ier = _backend.dvrfidf_rs(
                 u_slice, v_slice, glat_vals, glon_vals, int(iopt), xmsg_rs, R
             )
             if ier != 0:
@@ -588,7 +569,7 @@ def calc_divergence_ncl(
             u_slice = u_fort_batch[idx]
             v_slice = v_fort_batch[idx]
 
-            dv_slice_fort, ier = ddvfidf_ncl(
+            dv_slice_fort, ier = _backend.ddvfidf_ncl(
                 u_slice, v_slice, glat_vals, glon_vals, xmsg_fort, iopt
             )
             if ier != 0:
@@ -739,7 +720,7 @@ def calc_vorticity_ncl(
             u_slice = u_fort_batch[idx]
             v_slice = v_fort_batch[idx]
 
-            rv_slice_fort, ier = dvrfidf_ncl(
+            rv_slice_fort, ier = _backend.dvrfidf_ncl(
                 u_slice, v_slice, glat_vals, glon_vals, xmsg_fort, iopt
             )
             if ier != 0:

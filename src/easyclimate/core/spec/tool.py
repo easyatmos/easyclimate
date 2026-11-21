@@ -4,7 +4,7 @@ Tools for spherical harmonics analysis
 This is the top layer of packaging for the Pyspharm package.
 """
 
-from ...backend import spharm, spectral_tool_rs, Spharmt_rs
+from ... import backend as _backend
 import xarray as xr
 import numpy as np
 from typing import Literal
@@ -49,7 +49,7 @@ def calc_gaussian_latitudes(nlat: int):
         tool_spec
 
     """
-    lats, wts = spharm.gaussian_lats_wts(nlat)
+    lats, wts = _backend.spharm.gaussian_lats_wts(nlat)
 
     lats_array = xr.DataArray(lats, name="lats")
     lats_array.attrs["name"] = "Gaussian latitudes (degrees)"
@@ -86,7 +86,7 @@ def calc_gaussian_latitudes_rs(nlat: int):
         tool_spec
 
     """
-    lats, wts = spectral_tool_rs.gaussian_lats_wts_rs(nlat)
+    lats, wts = _backend.spectral_tool_rs.gaussian_lats_wts_rs(nlat)
 
     lats_array = xr.DataArray(lats, name="lats")
     lats_array.attrs["name"] = "Gaussian latitudes (degrees)"
@@ -122,7 +122,7 @@ def calc_geodesic_points(m: int):
         tool_spec
 
     """
-    lats, lons = spharm.getgeodesicpts(m)
+    lats, lons = _backend.spharm.getgeodesicpts(m)
 
     lats_array = xr.DataArray(lats, name="lats")
     lats_array.attrs["name"] = "Geodesic point latitudes (degrees)"
@@ -157,7 +157,7 @@ def calc_geodesic_points_rs(m: int):
         tool_spec
 
     """
-    lats, lons = spectral_tool_rs.getgeodesicpts_rs(m)
+    lats, lons = _backend.spectral_tool_rs.getgeodesicpts_rs(m)
 
     lats_array = xr.DataArray(lats, name="lats")
     lats_array.attrs["name"] = "Geodesic point latitudes (degrees)"
@@ -190,7 +190,7 @@ def calc_spherical_harmonic_coefficients(ntrunc: int):
         tool_spec
 
     """
-    indxm, indxn = spharm.getspecindx(ntrunc)
+    indxm, indxn = _backend.spharm.getspecindx(ntrunc)
 
     indxm_array = xr.DataArray(indxm, name="indxm")
     indxm_array.attrs["name"] = "Zonal wavenumber of spherical harmonic coefficients"
@@ -223,7 +223,7 @@ def calc_spherical_harmonic_coefficients_rs(ntrunc: int):
         tool_spec
 
     """
-    indxm, indxn = spectral_tool_rs.getspecindx(ntrunc)
+    indxm, indxn = _backend.spectral_tool_rs.getspecindx(ntrunc)
 
     indxm_array = xr.DataArray(indxm, name="indxm")
     indxm_array.attrs["name"] = "Zonal wavenumber of spherical harmonic coefficients"
@@ -257,7 +257,7 @@ def calc_legendre_functions(lat: float, ntrunc: int) -> xr.DataArray:
         tool_spec
 
     """
-    pnm = spharm.legendre(lat, ntrunc)
+    pnm = _backend.spharm.legendre(lat, ntrunc)
     pnm_array = xr.DataArray(pnm, name="pnm")
 
     return pnm_array
@@ -284,7 +284,7 @@ def calc_legendre_functions_rs(lat: float, ntrunc: int) -> xr.DataArray:
         tool_spec
 
     """
-    pnm = spectral_tool_rs.legendre_rs(lat, ntrunc)
+    pnm = _backend.spectral_tool_rs.legendre_rs(lat, ntrunc)
     pnm_array = xr.DataArray(pnm, name="pnm")
 
     return pnm_array
@@ -336,7 +336,7 @@ def transfer_grid2spectral_transform(
     nspec = (ntrunc + 1) * (ntrunc + 2) // 2
 
     # Initialize spherical harmonic transform object
-    sph = spharm.Spharmt(nlon, nlat, gridtype=grid_data_type)
+    sph = _backend.spharm.Spharmt(nlon, nlat, gridtype=grid_data_type)
 
     def _grdtospec(data):
         """Perform actual grid-to-spectral space transformation"""
@@ -415,7 +415,7 @@ def transfer_grid2spectral_transform_rs(
     nspec = (ntrunc + 1) * (ntrunc + 2) // 2
 
     # Initialize spherical harmonic transform object
-    sph = Spharmt_rs(
+    sph = _backend.Spharmt_rs(
         nlon, nlat, gridtype=grid_data_type, transform_backend=transform_backend
     )
 
@@ -490,7 +490,7 @@ def transfer_spectral_transform2grid(
 
     """
     # Initialize spherical harmonic transform object with specified grid parameters
-    sph = spharm.Spharmt(nlon, nlat, gridtype=grid_data_type)
+    sph = _backend.spharm.Spharmt(nlon, nlat, gridtype=grid_data_type)
 
     def _spectogrd(data):
         """Perform actual spectral-to-grid space transformation"""
@@ -567,7 +567,7 @@ def transfer_spectral_transform2grid_rs(
 
     """
     # Initialize spherical harmonic transform object with specified grid parameters
-    sph = Spharmt_rs(
+    sph = _backend.Spharmt_rs(
         nlon, nlat, gridtype=grid_data_type, transform_backend=transform_backend
     )
 

@@ -10,14 +10,7 @@ import xarray as xr
 import pandas as pd
 
 from math import sqrt
-from ..backend import (
-    barnes_rs,
-    barnesS2_rs,
-    radius_mask_2d_rs,
-    barnes_numba,
-    barnes_S2_numba,
-    kdtree_fastbarnes as kdtree,
-)
+from .. import backend as _backend
 
 __all__ = [
     "interp_spatial_barnes",
@@ -384,7 +377,7 @@ def interp_spatial_barnes(
     # -------------------------
     pts = np.c_[stn_lon, stn_lat].astype(np.float64)
 
-    field = barnes_numba(
+    field = _backend.barnes_numba(
         pts,
         values.astype(np.float64),
         float(sigma_grid),
@@ -426,8 +419,10 @@ def interp_spatial_barnes(
     # -------------------------
     if mask_radius_deg is not None:
         # build kd-tree once
-        tree, pts_ref = kdtree.create_kdtree(pts)
-        kd_search = kdtree.prepare_search(float(mask_radius_deg), tree, pts_ref)
+        tree, pts_ref = _backend.kdtree_fastbarnes.create_kdtree(pts)
+        kd_search = _backend.kdtree_fastbarnes.prepare_search(
+            float(mask_radius_deg), tree, pts_ref
+        )
         res_index, res_sqr_dist, _, _, _ = kd_search  # reusable arrays
 
         mask = np.zeros((ny, nx), dtype=bool)
@@ -436,7 +431,7 @@ def interp_spatial_barnes(
             c[1] = lat0 + j * step
             for i in range(nx):
                 c[0] = lon0 + i * step
-                kdtree.radius_search(c, *kd_search)
+                _backend.kdtree_fastbarnes.radius_search(c, *kd_search)
                 mask[j, i] = res_index[-1] > 0
 
         da = da.where(mask)
@@ -608,7 +603,7 @@ def interp_spatial_barnes_rs(
     # -------------------------
     pts = np.c_[stn_lon, stn_lat].astype(np.float64)
 
-    field = barnes_rs(
+    field = _backend.barnes_rs(
         pts,
         values.astype(np.float64),
         float(sigma_grid),
@@ -650,7 +645,7 @@ def interp_spatial_barnes_rs(
     # -------------------------
     if mask_radius_deg is not None:
         # pts is (N,2) float64, x0 is (2,), step is scalar, size is (2,) [nx, ny]
-        mask = radius_mask_2d_rs(
+        mask = _backend.radius_mask_2d_rs(
             pts.astype(np.float64),
             x0.astype(np.float64),
             np.asarray([step, step], dtype=np.float64),
@@ -897,7 +892,7 @@ def interp_spatial_barnesS2(
     # -------------------------
     pts = np.c_[stn_lon, stn_lat].astype(np.float64)
 
-    field = barnes_S2_numba(
+    field = _backend.barnes_S2_numba(
         pts,
         values.astype(np.float64),
         float(sigma_grid),
@@ -942,8 +937,10 @@ def interp_spatial_barnesS2(
     # Note: mask uses lon/lat degree distance (planar) as a pragmatic cutoff.
     # -------------------------
     if mask_radius_deg is not None:
-        tree, pts_ref = kdtree.create_kdtree(pts)
-        kd_search = kdtree.prepare_search(float(mask_radius_deg), tree, pts_ref)
+        tree, pts_ref = _backend.kdtree_fastbarnes.create_kdtree(pts)
+        kd_search = _backend.kdtree_fastbarnes.prepare_search(
+            float(mask_radius_deg), tree, pts_ref
+        )
         res_index, _, _, _, _ = kd_search
 
         mask = np.zeros((ny, nx), dtype=bool)
@@ -952,7 +949,7 @@ def interp_spatial_barnesS2(
             c[1] = lat0 + j * step
             for i in range(nx):
                 c[0] = lon0 + i * step
-                kdtree.radius_search(c, *kd_search)
+                _backend.kdtree_fastbarnes.radius_search(c, *kd_search)
                 mask[j, i] = res_index[-1] > 0
 
         da = da.where(mask)
@@ -1100,7 +1097,7 @@ def interp_spatial_barnesS2_rs(
 
     pts = np.c_[stn_lon, stn_lat].astype(np.float64)
 
-    field = barnesS2_rs(
+    field = _backend.barnesS2_rs(
         pts,
         values.astype(np.float64),
         float(sigma_grid),
@@ -1141,7 +1138,7 @@ def interp_spatial_barnesS2_rs(
     )
 
     if mask_radius_deg is not None:
-        mask = radius_mask_2d_rs(
+        mask = _backend.radius_mask_2d_rs(
             pts.astype(np.float64),
             x0.astype(np.float64),
             np.asarray([step, step], dtype=np.float64),

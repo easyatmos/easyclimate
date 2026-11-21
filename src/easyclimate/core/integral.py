@@ -210,31 +210,8 @@ def _get_mass_weighted_units(input_units: str) -> str:
     return f"({input_units} Pa)/(m s-2)" if input_units else "Pa/(m s-2)"
 
 
-def _import_rust_vibeta_functions():
-    try:
-        from ..backend import (
-            dvibeta_rs,
-            dvibeta_batch,
-            dvibeta_batch_sum_norm,
-            dvibeta_batch_noreyon,
-            dvibeta_batch_sum_norm_noreyon,
-        )
-    except ImportError as exc:
-        raise ImportError(
-            "Rust vibeta backend is unavailable. Please install `easyclimate_rust`."
-        ) from exc
-
-    return (
-        dvibeta_rs,
-        dvibeta_batch,
-        dvibeta_batch_sum_norm,
-        dvibeta_batch_noreyon,
-        dvibeta_batch_sum_norm_noreyon,
-    )
-
-
 def _get_rust_profile_block(level: np.ndarray):
-    dvibeta_rs, _, _, _, _ = _import_rust_vibeta_functions()
+    from ..backend import dvibeta_rs
 
     level_f64 = np.ascontiguousarray(level, dtype=np.float64)
     ptop = float(level_f64[-1])
@@ -297,14 +274,6 @@ def _calc_top2surface_rust(
     vertical_dim_units: Literal["hPa", "Pa", "mbar"],
     method: Literal["rust", "rust-block", "rust-block-noreyon"],
 ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
-    (
-        _,
-        dvibeta_batch,
-        dvibeta_batch_sum_norm,
-        dvibeta_batch_noreyon,
-        dvibeta_batch_sum_norm_noreyon,
-    ) = _import_rust_vibeta_functions()
-
     data_input, surface_pressure_data, level = _prepare_top2surface_inputs(
         data_input=data_input,
         surface_pressure_data=surface_pressure_data,
@@ -342,13 +311,11 @@ def _calc_top2surface_rust(
         return integral, layer_thickness, surface_pressure_data
 
     if method in {"rust-block", "rust-block-noreyon"}:
-        if method == "rust-block-noreyon" and (
-            dvibeta_batch_noreyon is None or dvibeta_batch_sum_norm_noreyon is None
-        ):
-            raise ImportError(
-                "`rust-block-noreyon` requires an easyclimate_rust build that "
-                "exports the no-Rayon vibeta functions."
-            )
+        from ..backend import require
+
+        suffix = "_noreyon" if method == "rust-block-noreyon" else ""
+        batch_fn = require("dvibeta_batch" + suffix)
+        batch_sum_norm_fn = require("dvibeta_batch_sum_norm" + suffix)
         level_f64 = np.ascontiguousarray(level, dtype=np.float64)
         ptop = np.float64(level_f64[-1])
         xmsg = np.float64(1e30)
@@ -357,22 +324,12 @@ def _calc_top2surface_rust(
         def vibeta_block(x, psfc):
             x = np.ascontiguousarray(x, dtype=np.float64)
             psfc = np.ascontiguousarray(psfc, dtype=np.float64)
-            batch_fn = (
-                dvibeta_batch_noreyon
-                if method == "rust-block-noreyon"
-                else dvibeta_batch
-            )
             vint, _ = batch_fn(level_f64, x, psfc, xmsg, linlog, ptop)
             return vint
 
         def vibeta_block_sum_norm(x, psfc):
             x = np.ascontiguousarray(x, dtype=np.float64)
             psfc = np.ascontiguousarray(psfc, dtype=np.float64)
-            batch_sum_norm_fn = (
-                dvibeta_batch_sum_norm_noreyon
-                if method == "rust-block-noreyon"
-                else dvibeta_batch_sum_norm
-            )
             vsum, vnorm, _ = batch_sum_norm_fn(level_f64, x, psfc, xmsg, linlog, ptop)
             return vsum, vnorm
 
