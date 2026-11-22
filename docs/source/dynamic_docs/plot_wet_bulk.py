@@ -101,12 +101,10 @@ td_mesh = temp_mesh2 - deltaT_mesh
 # %%
 # Iterative Calculation
 # -----------------------------------------------------
-# This section computes wet-bulb potential temperature using the :py:func:`easyclimate.physics.calc_wet_bulb_potential_temperature_iteration <easyclimate.physics.calc_wet_bulb_potential_temperature_iteration>`
-# function from easyclimate. The function:
-#
-# - Takes temperature, relative humidity, and pressure (1013.25 hPa) as inputs.
-# - Uses an iterative approach based on the psychrometric formula with a psychrometer constant (:math:`A = 0.662 \cdot 10^{-3}`).
-# - Outputs wet-bulb temperature in °C for a 2D grid of conditions.
+# Compute liquid-water wet-bulb temperature using :py:func:`easyclimate.physics.calc_wet_bulb_temperature_iteration <easyclimate.physics.calc_wet_bulb_temperature_iteration>`.
+# This comparison uses local pressure of 1013.25 hPa to match the Stull fit
+# and the ventilated psychrometer coefficient :math:`A = 0.662 \cdot 10^{-3}`.
+# Use ``phase="ice"`` if the bulb is ice-covered.
 #
 # .. seealso::
 #
@@ -116,7 +114,7 @@ td_mesh = temp_mesh2 - deltaT_mesh
 #
 # The result, wet_bulb_iteration, is extracted for a single pressure level.
 
-wet_bulb_iteration = ecl.physics.calc_wet_bulb_potential_temperature_iteration(
+wet_bulb_iteration = ecl.physics.calc_wet_bulb_temperature_iteration(
     temp_mesh1,
     rh_mesh,
     xr.DataArray([1013.25], dims="p"),
@@ -205,47 +203,44 @@ diff.plot.contourf(
 # Grid
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
-# This section computes wet-bulb temperature using :py:func:`easyclimate.physics.calc_wet_bulb_temperature_sadeghi2013 <easyclimate.physics.calc_wet_bulb_temperature_sadeghi2013>` at three elevations (0 m, 2000 m, 5000 m):
-#
-# - Uses temp_mesh1 and rh_mesh as inputs, with height specified as an :py:class:`xarray.DataArray<xarray.DataArray>`.
-# - Outputs results in °C for each elevation.
+# Compute thermodynamic wet-bulb temperature using :py:func:`easyclimate.physics.calc_wet_bulb_temperature_sadeghi2013 <easyclimate.physics.calc_wet_bulb_temperature_sadeghi2013>` at 0 m, 2000 m, and 4500 m.
+# The paper validated the method up to 4500 m above mean sea level. The
+# example uses its validation ranges of −17 to 40 °C and 5% to 100% relative humidity.
 #
 # .. seealso::
 #
 #     - Sadeghi, S., Peters, T. R., Cobos, D. R., Loescher, H. W., & Campbell, C. S. (2013). Direct Calculation of Thermodynamic Wet-Bulb Temperature as a Function of Pressure and Elevation. Journal of Atmospheric and Oceanic Technology, 30(8), 1757-1765. https://doi.org/10.1175/JTECH-D-12-00191.1
 #
-#
-# This evaluates the impact of elevation on wet-bulb temperature using Sadeghi's empirical formula.
+
+sadeghi_grid = {"temp": slice(-17, 40), "rh": slice(5, 100)}
+sadeghi_temp = temp_mesh1.sel(sadeghi_grid)
+sadeghi_rh = rh_mesh.sel(sadeghi_grid)
 
 wet_bulb_sadeghi2013_0m = ecl.physics.calc_wet_bulb_temperature_sadeghi2013(
-    temp_mesh1, xr.DataArray([0], dims="height"), rh_mesh, "degC", "m", "%"
+    sadeghi_temp, xr.DataArray([0], dims="height"), sadeghi_rh, "degC", "m", "%"
 ).isel(height = 0)
 
 wet_bulb_sadeghi2013_2000m = ecl.physics.calc_wet_bulb_temperature_sadeghi2013(
-    temp_mesh1, xr.DataArray([2000], dims="height"), rh_mesh, "degC", "m", "%"
+    sadeghi_temp, xr.DataArray([2000], dims="height"), sadeghi_rh, "degC", "m", "%"
 ).isel(height = 0)
 
-wet_bulb_sadeghi2013_5000m = ecl.physics.calc_wet_bulb_temperature_sadeghi2013(
-    temp_mesh1, xr.DataArray([5000], dims="height"), rh_mesh, "degC", "m", "%"
+wet_bulb_sadeghi2013_4500m = ecl.physics.calc_wet_bulb_temperature_sadeghi2013(
+    sadeghi_temp, xr.DataArray([4500], dims="height"), sadeghi_rh, "degC", "m", "%"
 ).isel(height = 0)
 
 # %%
-# Comparison (0 m vs. 5000 m)
-# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# Comparison (0 m vs. 4500 m)
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^
 #
-# This section visualizes the Sadeghi results:
-#
-# - Creates a contour plot of ``wet_bulb_sadeghi2013_0m``.
-# - Overlays contours of ``wet_bulb_sadeghi2013_5000m`` in black.
-# - Plots the difference (``wet_bulb_sadeghi2013_0m - wet_bulb_sadeghi2013_5000m``) to show elevation effects.
-#
-# These plots illustrate how elevation influences wet-bulb temperature.
+# Filled contours show the sea-level wet-bulb temperature, and black contours
+# show the result at 4500 m. The second plot shows the sea-level value minus
+# the value at 4500 m.
 
 wet_bulb_sadeghi2013_0m.plot.contourf(levels = 21)
-wet_bulb_sadeghi2013_5000m.plot.contour(levels = 21, colors='k')
+wet_bulb_sadeghi2013_4500m.plot.contour(levels = 21, colors='k')
 
 # %%
-diff = wet_bulb_sadeghi2013_0m - wet_bulb_sadeghi2013_5000m
+diff = wet_bulb_sadeghi2013_0m - wet_bulb_sadeghi2013_4500m
 diff.plot.contourf(
     levels = np.linspace(-6, 6, 21)
 )

@@ -102,6 +102,7 @@ _BACKENDS = {
         "easyclimate_backend.wet_bulb._wet_bulb_temperature",
         None,
     ),
+    "_wet_bulb_temperature_rust": ("easyclimate_rust._easyclimate_rust", None),
     "calc_wet_bulb_temperature_rs": (
         "easyclimate_rust._easyclimate_rust",
         "calc_wet_bulb_temperature",
