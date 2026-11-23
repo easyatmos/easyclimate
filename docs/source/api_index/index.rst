@@ -61,6 +61,7 @@ Statistics
     easyclimate.core.stats.detrend_spatial
     easyclimate.core.stats.yearstat
     easyclimate.core.stats.monthstat
+    easyclimate.core.stats.daystat
     easyclimate.core.stats.seasonstat
     easyclimate.core.mk_test
     easyclimate.core.eof
