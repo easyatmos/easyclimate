@@ -67,7 +67,7 @@ def interp_mesh2mesh(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_mesh2mesh
     """
     _backend.require("xarray_regrid")
 

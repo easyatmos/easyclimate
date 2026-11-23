@@ -283,7 +283,7 @@ def interp_spatial_barnes(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_point2mesh
     """
     if grid_res_deg <= 0:
         raise ValueError("grid_res_deg must be > 0")
@@ -509,7 +509,7 @@ def interp_spatial_barnes_rs(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_point2mesh
     """
     if grid_res_deg <= 0:
         raise ValueError("grid_res_deg must be > 0")
