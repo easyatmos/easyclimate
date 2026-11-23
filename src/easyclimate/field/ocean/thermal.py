@@ -3,153 +3,158 @@ The calculation of ocean thermocline variables.
 """
 
 from __future__ import annotations
-import xarray as xr
+from typing import Literal
+
 import numpy as np
-from ...core.diff import calc_gradient
+import xarray as xr
+
+
+def _temperature_in_depth_order(
+    temperature: xr.DataArray, depth_dim: str
+) -> xr.DataArray:
+    depth = temperature[depth_dim]
+    steps = np.diff(depth.values.astype(float))
+    if depth.size == 0 or not np.isfinite(depth.values).all():
+        raise ValueError("Depth must be nonempty and all its levels must be finite.")
+    if np.all(steps > 0):
+        return temperature
+    if np.all(steps < 0):
+        return temperature.isel({depth_dim: slice(None, None, -1)})
+    raise ValueError("Depth must be strictly monotonic.")
 
 
 def calc_seawater_thermocline_depth(
-    seawater_temperature_data: xr.DataArray, depth_dim: str = "depth"
+    seawater_temperature_data: xr.DataArray,
+    depth_dim: str = "depth",
+    *,
+    method: Literal["layer", "centered"] = "layer",
 ) -> xr.DataArray:
     """
-    Caculate thermocline depth of ocean temperature.
+    Find the depth of the strongest vertical cooling in each temperature profile.
 
     Parameters
     ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
+    seawater_temperature_data : xarray.DataArray
+        Seawater temperature with a one-dimensional, positive-down depth coordinate.
+    depth_dim : str, default: "depth"
+        Name of the depth dimension. Levels may be in either order.
+    method : {"layer", "centered"}, default: "layer"
+        "layer" computes the cooling rate between adjacent valid levels and returns
+        their midpoint. "centered" differentiates on the actual depth coordinates
+        and returns a sampled depth. The centered method uses first-order
+        one-sided differences at the ends of the depth coordinate.
 
     Returns
     -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    xarray.DataArray
+        Depth in the input coordinate's units. Ties select the shallowest depth.
+        Profiles without a positive cooling rate return NaN.
     """
-    # Caculate gradient
-    dTdz = calc_gradient(seawater_temperature_data, dim=depth_dim)
-    depth_weight = calc_gradient(seawater_temperature_data[depth_dim], dim=depth_dim)
-    dTdz_dataarray = dTdz / depth_weight
+    if method not in ("layer", "centered"):
+        raise ValueError("method must be 'layer' or 'centered'.")
 
-    # Find the minimum gradient
-    dTdz_dataarray_index = dTdz_dataarray.where(
-        dTdz_dataarray == dTdz_dataarray.min(dim=depth_dim)
-    )
+    temperature = _temperature_in_depth_order(seawater_temperature_data, depth_dim)
+    temperature = temperature.where(np.isfinite(temperature))
+    depth = temperature[depth_dim].astype(float)
+    next_depth = depth.shift({depth_dim: -1})
+    spacing = next_depth - depth
+    next_temperature = temperature.shift({depth_dim: -1})
+    layer_cooling = (temperature - next_temperature) / spacing
+    if method == "layer":
+        cooling = layer_cooling
+        candidate_depth = (depth + next_depth) / 2
+    else:
+        previous_spacing = spacing.shift({depth_dim: 1})
+        previous_cooling = layer_cooling.shift({depth_dim: 1})
+        # Unequal spacing determines the weights of the two neighboring slopes.
+        cooling = (previous_cooling * spacing + layer_cooling * previous_spacing) / (
+            previous_spacing + spacing
+        )
+        cooling = xr.where(depth == depth[0], layer_cooling, cooling)
+        cooling = xr.where(depth == depth[-1], previous_cooling, cooling)
+        candidate_depth = depth
 
-    # Mismatch
-    dTdz_dataarray_bool = dTdz_dataarray.isin(dTdz_dataarray_index)
-    dTdz_dataarray_bool_plus1 = dTdz_dataarray_bool.isel(
-        {depth_dim: slice(None, -1)}
-    ).assign_coords({depth_dim: dTdz_dataarray_bool[depth_dim].data[1:]})
-    dTdz_dataarray_bool_minus1 = dTdz_dataarray_bool.isel(
-        {depth_dim: slice(1, None)}
-    ).assign_coords({depth_dim: dTdz_dataarray_bool[depth_dim].data[:-1]})
-
-    # Find the nearest point to linear interpolation
-    depth_3d_array = xr.broadcast(
-        seawater_temperature_data[depth_dim], seawater_temperature_data
-    )[0]
-    thermal_depth_1 = depth_3d_array.where(dTdz_dataarray_bool).min(dim=depth_dim)
-    thermal_depth_2 = depth_3d_array.where(dTdz_dataarray_bool_plus1).min(dim=depth_dim)
-    thermal_depth_3 = depth_3d_array.where(dTdz_dataarray_bool_minus1).min(
-        dim=depth_dim
-    )
-    thermal_depth = (thermal_depth_1 + thermal_depth_2 + thermal_depth_3) / 3
-
-    return thermal_depth
+    cooling = cooling.where(np.isfinite(cooling) & (cooling > 0))
+    strongest = cooling == cooling.max(dim=depth_dim)
+    result = candidate_depth.where(strongest).min(dim=depth_dim)
+    result.attrs = {"long_name": "Thermocline depth"}
+    if "units" in depth.attrs:
+        result.attrs["units"] = depth.attrs["units"]
+    return result.rename(depth_dim)
 
 
 def calc_Dx_depth(
     seawater_temperature_data: xr.DataArray,
     value: float,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate `value` depth of ocean temperature.
+    Find the depth of a target temperature in each seawater profile.
 
     Parameters
     ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float.
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
+    seawater_temperature_data : xarray.DataArray
+        Seawater temperature in degrees Celsius with a one-dimensional,
+        positive-down depth coordinate.
+    value : float
+        Target temperature in degrees Celsius.
+    depth_dim : str, default: "depth"
+        Name of the depth dimension. Levels may be in either order.
+    method : {"shallowest", "deepest"}, default: "shallowest"
+        Select the shallowest or deepest occurrence of the target temperature.
+        Exact hits use the sampled depth. Crossings in either direction use
+        linear interpolation between adjacent valid levels.
 
     Returns
     -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    xarray.DataArray
+        Depth in the input coordinate's units. Profiles without a crossing or
+        exact hit return NaN.
     """
+    if method not in ("shallowest", "deepest"):
+        raise ValueError("method must be 'shallowest' or 'deepest'.")
 
-    def _calc_linear_interpolate(x1, x2, y1, y2):
-        return (x2 * y1 - x1 * y2) / (x2 - x1)
+    temperature = _temperature_in_depth_order(seawater_temperature_data, depth_dim)
+    temperature = temperature.where(np.isfinite(temperature))
+    depth = temperature[depth_dim].astype(float)
+    next_depth = depth.shift({depth_dim: -1})
+    next_temperature = temperature.shift({depth_dim: -1})
 
-    data_anormaly = seawater_temperature_data - value
-    abs_value = np.abs(data_anormaly)
-
-    # Find minimum index
-    min_index = abs_value.fillna(9999).argmin(dim=depth_dim, skipna=True)
-
-    # The closest value to `value` in `seawater_temperature_data` and the depth value
-    data_middle = data_anormaly.isel({depth_dim: min_index})
-    data_middle_depth = data_middle[depth_dim]
-
-    # The 2nd, 3rd closest value to `value` in `seawater_temperature_data` and the depth value
-    data_up = seawater_temperature_data.isel({depth_dim: min_index - 1})
-    data_down = seawater_temperature_data.isel({depth_dim: min_index + 1})
-
-    # Find 2nd closest value to `value` in `seawater_temperature_data` and the depth value
-    data_nearest = xr.concat(
-        [
-            data_up.assign_coords({"type": 0}).expand_dims({"type": 1}),
-            data_down.assign_coords({"type": 1}).expand_dims({"type": 1}),
-        ],
-        dim="type",
-    ).min(dim="type")
-    tmp1_anormaly = xr.broadcast(seawater_temperature_data, data_nearest)[1]
-    tmp2_deptharray = xr.broadcast(
-        seawater_temperature_data, seawater_temperature_data[depth_dim]
-    )[1]
-    data_nearest_depth = tmp2_deptharray.where(
-        tmp1_anormaly == seawater_temperature_data
-    ).min(dim=depth_dim)
-
-    # Linear interpolation
-    isotherm_depth = _calc_linear_interpolate(
-        data_nearest, data_middle, data_middle_depth, data_nearest_depth
+    crosses = ((temperature > value) & (next_temperature < value)) | (
+        (temperature < value) & (next_temperature > value)
     )
-
-    # Create mask
-    mask = (np.isnan(data_anormaly)).all(dim=depth_dim)
-    mask = 1 - mask
-
-    return isotherm_depth.where(mask)
+    fraction = (value - temperature) / (next_temperature - temperature).where(crosses)
+    crossing_depth = depth + fraction * (next_depth - depth)
+    candidates = xr.where(temperature == value, depth, crossing_depth)
+    if method == "shallowest":
+        result = candidates.min(dim=depth_dim)
+    else:
+        result = candidates.max(dim=depth_dim)
+    result.attrs = {"long_name": f"Depth of the {value:g} °C isotherm"}
+    if "units" in depth.attrs:
+        result.attrs["units"] = depth.attrs["units"]
+    return result.rename(None)
 
 
 def calc_D14_depth(
     seawater_temperature_data: xr.DataArray,
     value: float = 14,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate 14m depth of ocean temperature.
+    Find the depth of the 14 °C isotherm.
 
-    Parameters
-    ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float (:math:`\\mathrm{m}`).
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
-
-    Returns
-    -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    See :func:`calc_Dx_depth` for the temperature, depth coordinate and crossing options.
     """
     return calc_Dx_depth(
         seawater_temperature_data=seawater_temperature_data,
         value=value,
         depth_dim=depth_dim,
+        method=method,
     )
 
 
@@ -157,27 +162,19 @@ def calc_D17_depth(
     seawater_temperature_data: xr.DataArray,
     value: float = 17,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate 17m depth of ocean temperature.
+    Find the depth of the 17 °C isotherm.
 
-    Parameters
-    ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float (:math:`\\mathrm{m}`).
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
-
-    Returns
-    -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    See :func:`calc_Dx_depth` for the temperature, depth coordinate and crossing options.
     """
     return calc_Dx_depth(
         seawater_temperature_data=seawater_temperature_data,
         value=value,
         depth_dim=depth_dim,
+        method=method,
     )
 
 
@@ -185,27 +182,19 @@ def calc_D20_depth(
     seawater_temperature_data: xr.DataArray,
     value: float = 20,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate 20m depth of ocean temperature.
+    Find the depth of the 20 °C isotherm.
 
-    Parameters
-    ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float (:math:`\\mathrm{m}`).
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
-
-    Returns
-    -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    See :func:`calc_Dx_depth` for the temperature, depth coordinate and crossing options.
     """
     return calc_Dx_depth(
         seawater_temperature_data=seawater_temperature_data,
         value=value,
         depth_dim=depth_dim,
+        method=method,
     )
 
 
@@ -213,27 +202,19 @@ def calc_D26_depth(
     seawater_temperature_data: xr.DataArray,
     value: float = 26,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate 26m depth of ocean temperature.
+    Find the depth of the 26 °C isotherm.
 
-    Parameters
-    ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float (:math:`\\mathrm{m}`).
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
-
-    Returns
-    -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    See :func:`calc_Dx_depth` for the temperature, depth coordinate and crossing options.
     """
     return calc_Dx_depth(
         seawater_temperature_data=seawater_temperature_data,
         value=value,
         depth_dim=depth_dim,
+        method=method,
     )
 
 
@@ -241,25 +222,17 @@ def calc_D28_depth(
     seawater_temperature_data: xr.DataArray,
     value: float = 28,
     depth_dim: str = "depth",
+    *,
+    method: Literal["shallowest", "deepest"] = "shallowest",
 ) -> xr.DataArray:
     """
-    Caculate 28m depth of ocean temperature.
+    Find the depth of the 28 °C isotherm.
 
-    Parameters
-    ----------
-    seawater_temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`  (:math:`\\mathrm{^\\circ C}`).
-        ocean temperature :py:class:`xarray.DataArray<xarray.DataArray>` data to be calculated.
-    value: float (:math:`\\mathrm{m}`).
-        The depth of ocean temperature to be calculated.
-    depth_dim: :py:class:`str <str>`, default: `depth`.
-        `depth` like dimension over which to apply calculate. By default extracting is applied over the `depth` dimension.
-
-    Returns
-    -------
-    :py:class:`xarray.DataArray<xarray.DataArray>`.
+    See :func:`calc_Dx_depth` for the temperature, depth coordinate and crossing options.
     """
     return calc_Dx_depth(
         seawater_temperature_data=seawater_temperature_data,
         value=value,
         depth_dim=depth_dim,
+        method=method,
     )

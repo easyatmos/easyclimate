@@ -127,11 +127,11 @@ class RichDownloader:
             TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
             BarColumn(bar_width=None),
             "[progress.percentage]{task.percentage:>3.1f}%",
-            "•",
+            "|",
             DownloadColumn(),
-            "•",
+            "|",
             TransferSpeedColumn(),
-            "•",
+            "|",
             TimeRemainingColumn(),
         )
         self.task_id = None
@@ -293,6 +293,7 @@ def open_tutorial_dataset(
     * ``"PressQFF_202007271200_872"``: Observational data from European stations (from https://github.com/EXCITED-CO2/xarray-regrid)
     * ``"pr_wtr_eatm_2022"``: Precipitable water of the NCEP reanalysis subset in the 2022
     * ``"sst_mnmean_oisst"``: NOAA Optimum Interpolation (OI) SST V2 (from https://psl.noaa.gov/data/gridded/data.noaa.oisst.v2.html)
+    * ``"sample_soda_temperature_202008"``: Global SODA 3.4.2 potential temperature for August 2020
 
     Parameters
     ----------
