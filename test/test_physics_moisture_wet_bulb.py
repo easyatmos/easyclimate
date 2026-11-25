@@ -32,7 +32,7 @@ def test_wet_bulb_iteration_relative_humidity_units(method):
         method=method,
     )
 
-    assert percent.item() == pytest.approx(13.84156, abs=1e-4)
+    assert percent.item() == pytest.approx(13.84156164, abs=1e-4)
     xr.testing.assert_identical(fraction, percent)
 
 
@@ -51,7 +51,7 @@ def test_wet_bulb_iteration_convergence_at_limit(method):
         ).item()
 
     assert calculate(100.0) == 20.0
-    assert calculate(99.999) == pytest.approx(19.99989, abs=1e-5)
+    assert calculate(99.999) == pytest.approx(19.99988961, abs=1e-5)
     with pytest.raises(RuntimeError, match="converge"):
         calculate(50.0)
 
@@ -72,7 +72,7 @@ def test_wet_bulb_iteration_ice(method):
         phase="ice",
     )
 
-    assert result[0].item() == pytest.approx(-1.36, abs=0.01)
+    assert result[0].item() == pytest.approx(-1.35860392, abs=0.01)
     # Water-saturated air below freezing is supersaturated relative to ice.
     assert -10.0 < result[1].item() < 0.0
     assert np.isnan(result[2].item())

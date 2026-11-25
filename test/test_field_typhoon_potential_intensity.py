@@ -203,16 +203,17 @@ def test_calc_potential_intensity_Bister_Emanuel_2002():
     result_data10 = result_data.lndiseq.data.flatten()[1:3]
     result_data11 = result_data.lnCKCD.data.flatten()[1:3]
 
-    refer_data1 = np.array([76.95009593, 82.43842837])
-    refer_data2 = np.array([901.10611447, 880.6191603])
+    # Reference outputs from tcpyPI 1.5.0.
+    refer_data1 = np.array([76.69485494, 81.97556651])
+    refer_data2 = np.array([903.48916979, 884.81188215])
     refer_data3 = np.array([1, 1])
-    refer_data4 = np.array([189.53645087, 189.87265746])
-    refer_data5 = np.array([79.41954375, 73.94876851])
-    refer_data6 = np.array([0.59179393, 0.59215661])
-    refer_data7 = np.array([11117.45334146, 12752.05904792])
-    refer_data8 = np.array([8.68631421, 8.82410338])
-    refer_data9 = np.array([-0.5245968, -0.52398413])
-    refer_data10 = np.array([9.31627153, 9.45344803])
+    refer_data4 = np.array([189.51676885, 189.83953877])
+    refer_data5 = np.array([79.75766625, 74.60128679])
+    refer_data6 = np.array([0.59195924, 0.59243437])
+    refer_data7 = np.array([11040.73903136, 12603.3528492])
+    refer_data8 = np.array([8.67966925, 8.81284247])
+    refer_data9 = np.array([-0.52431749, -0.52351517])
+    refer_data10 = np.array([9.30934726, 9.44171816])
     refer_data11 = np.array([-0.10536052, -0.10536052])
 
     assert np.isclose(result_data1, refer_data1).all()

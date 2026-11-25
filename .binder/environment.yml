@@ -16,8 +16,8 @@ dependencies:
     - statsmodels
     - geocat-comp
     - gsw
-    - easyclimate-backend >= 2026.5.3
-    - easyclimate-rust >= 2026.5.2
+    - easyclimate-backend >= 2026.12.0
+    - easyclimate-rust >= 2026.12.0
     - spectralkernel-rs >= 1.0.1
     - dask
     - pymannkendall
@@ -26,7 +26,7 @@ dependencies:
     - pooch
     - zarr
     - metpy
-    - tcpypi
+    - tcpypi>=1.5.0
     - netCDF4
     - seaborn
     - EMD-signal
