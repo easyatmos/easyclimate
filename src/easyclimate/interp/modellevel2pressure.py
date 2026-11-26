@@ -60,7 +60,7 @@ def interp1d_vertical_model2pressure(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_model2pressure
     """
     from scipy.interpolate import interp1d
 

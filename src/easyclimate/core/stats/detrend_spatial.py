@@ -20,13 +20,7 @@ import dask.array as da
 
 __all__ = ["calc_detrend_spatial_fast"]
 
-from ...backend import (
-    calc_detrend_spatial_3d_rs,
-    calc_detrend_spatial_3d_chunked_rs,
-    calc_detrend_spatial_flexible_rs,
-)
-
-from ...backend import RUST_AVAILABLE
+from ... import backend as _backend
 
 
 def calc_detrend_spatial_fast(
@@ -136,7 +130,7 @@ def calc_detrend_spatial_fast(
 
     # Automatic method selection
     if method == "auto":
-        if RUST_AVAILABLE:
+        if _backend.is_available("calc_detrend_spatial_3d_rs"):
             method = "rust"
         else:
             method = "numpy"
@@ -156,12 +150,6 @@ def calc_detrend_spatial_fast(
     if method not in method_map:
         raise ValueError(
             f"Unknown method: {method}. Available methods: {list(method_map.keys())}"
-        )
-
-    if method.startswith("rust") and not RUST_AVAILABLE:
-        raise ImportError(
-            f"Rust backend not available for method '{method}'. "
-            f"Please install easyclimate_rust module or use another method."
         )
 
     # Call selected method
@@ -460,8 +448,7 @@ def calc_detrend_spatial_rust(
     - Efficient handling of NaN, Inf, and -Inf values
     - Cache-friendly memory access patterns
     """
-    if not RUST_AVAILABLE:
-        raise ImportError("Rust backend not available")
+    _backend.require("calc_detrend_spatial_3d_rs")
 
     # Get dimension order
     dims = list(data_input.dims)
@@ -487,14 +474,14 @@ def calc_detrend_spatial_rust(
             data_np = np.transpose(data_np, new_order)
 
             # Apply Rust function
-            result_np = calc_detrend_spatial_3d_rs(data_np, min_valid_fraction)
+            result_np = _backend.calc_detrend_spatial_3d_rs(data_np, min_valid_fraction)
 
             # Transpose back
             inverse_order = [new_order.index(i) for i in range(3)]
             result_np = np.transpose(result_np, inverse_order)
         else:
             # Time is already first dimension
-            result_np = calc_detrend_spatial_3d_rs(data_np, min_valid_fraction)
+            result_np = _backend.calc_detrend_spatial_3d_rs(data_np, min_valid_fraction)
     else:
         raise ValueError(
             f"Expected 3D data, got {len(dims)}D. "
@@ -532,8 +519,7 @@ def calc_detrend_spatial_rust_chunked(
     chunk_size : int, default 1000
         Number of spatial points to process per chunk.
     """
-    if not RUST_AVAILABLE:
-        raise ImportError("Rust backend not available")
+    _backend.require("calc_detrend_spatial_3d_chunked_rs")
 
     use_chunked = kwargs.get("use_chunked", True)
 
@@ -558,14 +544,14 @@ def calc_detrend_spatial_rust_chunked(
             new_order = [time_axis] + [i for i in range(3) if i != time_axis]
             data_np = np.transpose(data_np, new_order)
 
-            result_np = calc_detrend_spatial_3d_chunked_rs(
+            result_np = _backend.calc_detrend_spatial_3d_chunked_rs(
                 data_np, min_valid_fraction, chunk_size
             )
 
             inverse_order = [new_order.index(i) for i in range(3)]
             result_np = np.transpose(result_np, inverse_order)
         else:
-            result_np = calc_detrend_spatial_3d_chunked_rs(
+            result_np = _backend.calc_detrend_spatial_3d_chunked_rs(
                 data_np, min_valid_fraction, chunk_size
             )
     else:
@@ -599,8 +585,7 @@ def calc_detrend_spatial_rust_flexible(
 
     Can handle arbitrary dimension ordering without transposing.
     """
-    if not RUST_AVAILABLE:
-        raise ImportError("Rust backend not available")
+    _backend.require("calc_detrend_spatial_flexible_rs")
 
     dims = list(data_input.dims)
     if len(dims) != 3:
@@ -618,7 +603,9 @@ def calc_detrend_spatial_rust_flexible(
         data_np = data_np.astype(np.float64)
 
     # Call Rust function with flexible axis
-    result_np = calc_detrend_spatial_flexible_rs(data_np, time_axis, min_valid_fraction)
+    result_np = _backend.calc_detrend_spatial_flexible_rs(
+        data_np, time_axis, min_valid_fraction
+    )
 
     result = xr.DataArray(
         result_np,

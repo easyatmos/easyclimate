@@ -43,6 +43,7 @@
 "sample_mld_t_tendency" = 4
 "sample_mld_vertical_advection" = 4
 "sample_prho_data" = 4
+"sample_soda_temperature_202008" = 4
 "sample_surface_heat_flux" = 4
 "sample_thermocline_result" = 4
 "shum_202201_mon_mean" = 4
@@ -63,6 +64,7 @@
 "vwnd_day_ltm_1991_2020_0to6day" = 4
 "wrfout_d01_2022-05-01_00_00_00" = 4
 "x1_2562_grid" = 4
+"tn_waf_era5_202502_sample" = 4
 
 [tutorial_hashes]
 "PressQFF_202007271200_872.csv" = "md5:88359c832dd5dea1c2b0004ee6930a89"
@@ -104,6 +106,7 @@
 "sample_mld_t_tendency.nc" = "md5:4bfefa710b90635a7d25e11253c33038"
 "sample_mld_vertical_advection.nc" = "md5:8671dc8654309882e13c8d55cabae112"
 "sample_prho_data.nc" = "md5:e8bf8cb872418e9c1da5f04430f06cfe"
+"sample_soda_temperature_202008.nc" = "md5:2c78a2b0ab341c43ec8641a87a390ba4"
 "sample_surface_heat_flux.nc" = "md5:3acf762ed3eeb9870a358abffb307bdb"
 "sample_thermocline_result.nc" = "md5:d825f05270b1687519599cbb7fa426f4"
 "shum_202201_mon_mean.nc" = "md5:d5deae52c408aac8ccfea141df2ac6b6"
@@ -124,6 +127,7 @@
 "vwnd_day_ltm_1991_2020_0to6day.nc" = "md5:2842b468eeaa5781d6272ab6f4a087df"
 "wrfout_d01_2022-05-01_00_00_00.nc" = "md5:bb541b0d726a335ae4dbcc9e322cb06b"
 "x1_2562_grid.nc" = "md5:0af415d5c97e70073c56430eb708d795"
+"tn_waf_era5_202502_sample" = "md5:3fa927103aa6786c2eb9e8000d762d0b"
 
 [external_urls]
 

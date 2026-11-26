@@ -10,7 +10,7 @@ This is the top layer of packaging for the windspharm package.
 """
 
 import xarray as xr
-from ...backend import VectorWind, VectorWind_rs
+from ... import backend as _backend
 from typing import Literal
 
 __all__ = [
@@ -85,7 +85,7 @@ def calc_wind_speed(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     return w.magnitude()
 
 
@@ -130,7 +130,7 @@ def calc_wind_speed_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     return w.magnitude()
@@ -187,7 +187,7 @@ def calc_relative_vorticity_and_horizontal_divergence(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     vrt, div = w.vrtdiv(truncation=truncation)
 
     data = xr.Dataset()
@@ -248,7 +248,7 @@ def calc_relative_vorticity_and_horizontal_divergence_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     vrt, div = w.vrtdiv(truncation=truncation)
@@ -309,7 +309,7 @@ def calc_relative_vorticity(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     vrt = w.vorticity(truncation=truncation)
     return vrt
 
@@ -365,7 +365,7 @@ def calc_relative_vorticity_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     vrt = w.vorticity(truncation=truncation)
@@ -421,7 +421,7 @@ def calc_divergence(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     div = w.divergence(truncation=truncation)
     return div
 
@@ -476,7 +476,7 @@ def calc_divergence_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     div = w.divergence(truncation=truncation)
@@ -532,7 +532,7 @@ def calc_planetary_vorticity(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     pvrt = w.planetaryvorticity(omega=omega)
     return pvrt
 
@@ -587,7 +587,7 @@ def calc_planetary_vorticity_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     pvrt = w.planetaryvorticity(omega=omega)
@@ -646,7 +646,7 @@ def calc_absolute_vorticity(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     avrt = w.absolutevorticity(omega=omega, truncation=truncation)
     return avrt
 
@@ -704,7 +704,7 @@ def calc_absolute_vorticity_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     avrt = w.absolutevorticity(omega=omega, truncation=truncation)
@@ -761,7 +761,7 @@ def calc_streamfunction_and_velocity_potential(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     sf, vp = w.sfvp(truncation=truncation)
 
     data = xr.Dataset()
@@ -821,7 +821,7 @@ def calc_streamfunction_and_velocity_potential_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     sf, vp = w.sfvp(truncation=truncation)
@@ -881,7 +881,7 @@ def calc_streamfunction(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     sf = w.streamfunction(truncation=truncation)
     return sf
 
@@ -936,7 +936,7 @@ def calc_streamfunction_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     sf = w.streamfunction(truncation=truncation)
@@ -992,7 +992,7 @@ def calc_velocity_potential(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     vp = w.velocitypotential(truncation=truncation)
     return vp
 
@@ -1047,7 +1047,7 @@ def calc_velocity_potential_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     vp = w.velocitypotential(truncation=truncation)
@@ -1104,7 +1104,7 @@ def calc_helmholtz(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     uchi, vchi, upsi, vpsi = w.helmholtz(truncation=truncation)
 
     data = xr.Dataset()
@@ -1166,7 +1166,7 @@ def calc_helmholtz_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     uchi, vchi, upsi, vpsi = w.helmholtz(truncation=truncation)
@@ -1228,7 +1228,7 @@ def calc_irrotational_component(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     uchi, vchi = w.irrotationalcomponent(truncation=truncation)
 
     data = xr.Dataset()
@@ -1287,7 +1287,7 @@ def calc_irrotational_component_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     uchi, vchi = w.irrotationalcomponent(truncation=truncation)
@@ -1347,7 +1347,7 @@ def calc_nondivergent_component(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
     upsi, vpsi = w.nondivergentcomponent(truncation=truncation)
 
     data = xr.Dataset()
@@ -1406,7 +1406,7 @@ def calc_nondivergent_component_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
     upsi, vpsi = w.nondivergentcomponent(truncation=truncation)
@@ -1473,7 +1473,7 @@ def calc_rossby_wave_source(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(u_data, v_data, rsphere=R, legfunc=legfunc)
 
     eta = w.absolutevorticity()
     div = w.divergence(truncation=truncation)
@@ -1543,7 +1543,7 @@ def calc_rossby_wave_source_rs(
     _format_lat_lon_coordinate(u_data, lat_dim, lon_dim)
     _format_lat_lon_coordinate(v_data, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         u_data, v_data, rsphere=R, legfunc=legfunc, transform_backend=transform_backend
     )
 
@@ -1603,7 +1603,7 @@ def calc_gradient(
     """
     _format_lat_lon_coordinate(data_input, lat_dim, lon_dim)
 
-    w = VectorWind(data_input, data_input, rsphere=R, legfunc=legfunc)
+    w = _backend.VectorWind(data_input, data_input, rsphere=R, legfunc=legfunc)
     data_zonal, data_meridional = w.gradient(data_input, truncation=truncation)
 
     data = xr.Dataset()
@@ -1658,7 +1658,7 @@ def calc_gradient_rs(
     """
     _format_lat_lon_coordinate(data_input, lat_dim, lon_dim)
 
-    w = VectorWind_rs(
+    w = _backend.VectorWind_rs(
         data_input,
         data_input,
         rsphere=R,

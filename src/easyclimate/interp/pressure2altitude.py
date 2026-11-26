@@ -71,7 +71,7 @@ def interp1d_vertical_pressure2altitude(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_pressure2altitude
     """
     from scipy import interpolate
     from ..core.utility import replace_in_tuple
@@ -148,7 +148,7 @@ def interp1d_vertical_pressure2altitude_linear_rs(
     .. ecl-minigallery::
         :add-heading: Example(s) related to the function
 
-        interp
+        interp_pressure2altitude
     """
     from ..backend import interp1d_linear_core_rs
     from ..core.utility import replace_in_tuple

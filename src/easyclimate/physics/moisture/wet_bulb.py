@@ -3,6 +3,8 @@ Wet-bulb Temperature
 """
 
 from __future__ import annotations
+from math import exp, isfinite, isnan
+from operator import index
 import numpy as np
 import xarray as xr
 from typing import Literal
@@ -11,7 +13,6 @@ from ...core.units import (
     transfer_data_multiple_units,
     transfer_data_temperature_units,
 )
-from .vapor_pressure import calc_saturation_vapor_pressure
 from ..temperature.equivalent_potential_temperature import (
     calc_equivalent_potential_temperature,
 )
@@ -25,6 +26,38 @@ __all__ = [
 ]
 
 
+def _solve_wet_bulb_fallback(t_dry, rh, p, tolerance, coefficient, max_iter, ice):
+    """Use the checked convergence criteria with older native packages."""
+    ap = coefficient * p
+    residual_tolerance = min(1e-6, tolerance * ap)
+    # Keep the original liquid-water curve and share its zero-degree pressure.
+    e_zero = 6.1078
+    e_air = (rh / 100) * e_zero * exp(17.2693882 * (t_dry / (t_dry + 237.3)))
+    b, c = (22.46, 272.62) if ice else (17.2693882, 237.3)
+    t_wet = 0.0 if ice else t_dry
+
+    for iteration in range(max_iter + 1):
+        denominator = t_wet + c
+        if not isfinite(denominator) or denominator <= 0:
+            break
+        e_wet = e_zero * exp(b * (t_wet / denominator))
+        residual = e_wet - e_air + ap * (t_wet - t_dry)
+        if not isfinite(residual):
+            break
+        if abs(residual) <= residual_tolerance:
+            return t_wet
+        if ice and iteration == 0 and residual < 0:
+            raise ValueError("No ice-bulb solution at or below 0 °C")
+        if iteration == max_iter:
+            break
+        slope = e_wet * b * (c / denominator) / denominator + ap
+        if not isfinite(slope):
+            break
+        t_wet -= residual / slope
+
+    raise RuntimeError("Wet-bulb temperature did not converge")
+
+
 def calc_wet_bulb_temperature_iteration(
     temperature_data: xr.DataArray,
     relative_humidity_data: xr.DataArray,
@@ -32,13 +65,15 @@ def calc_wet_bulb_temperature_iteration(
     temperature_data_units: Literal["celsius", "kelvin", "fahrenheit"],
     relative_humidity_data_units: Literal["%", "dimensionless"],
     pressure_data_units: Literal["hPa", "Pa", "mbar"],
-    A: float = 0.662 * 10 ** (-3),
+    A: float | None = None,
     tolerance: float = 0.01,
     max_iter: int = 100,
     method: Literal["easyclimate-backend", "easyclimate-rust"] = "easyclimate-rust",
+    *,
+    phase: Literal["water", "ice"] = "water",
 ) -> xr.DataArray:
     """
-    Calculate wet-bulb potential temperature using iteration.
+    Calculate psychrometric wet-bulb temperature using iteration.
 
     The iterative formula
 
@@ -47,9 +82,9 @@ def calc_wet_bulb_temperature_iteration(
         e = e_{tw} - AP(t-t_{w})
 
     - :math:`e` is the water vapor pressure
-    - :math:`e_{tw}` is the saturation water vapor pressure over a pure flat ice surface at wet-bulb temperature :math:`t_w` (when the wet-bulb thermometer is frozen, this becomes the saturation vapor pressure over a pure flat ice surface)
-    - :math:`A` is the psychrometer constant
-    - :math:`P` is the sea-level pressure
+    - :math:`e_{tw}` is the saturation vapor pressure over the liquid or ice surface of the wet bulb at :math:`t_w`
+    - :math:`A` is the psychrometer coefficient
+    - :math:`P` is the local air pressure at the measurement level
     - :math:`t` is the dry-bulb temperature
     - :math:`t_w` is the wet-bulb temperature
 
@@ -58,17 +93,18 @@ def calc_wet_bulb_temperature_iteration(
     temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
         Atmospheric temperature.
     relative_humidity_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
-        The relative humidity.
+        Relative humidity with respect to liquid water in both phases. Finite values are clipped to the interval from 0% to 100%.
     pressure_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
-        The pressure data set.
+        Local air pressure. Valid pressure values are finite and strictly positive.
     temperature_data_units: :py:class:`str <str>`.
         The unit corresponding to `temperature_data` value. Optional values are `celsius`, `kelvin`, `fahrenheit`.
     relative_humidity_data_units: :py:class:`str <str>`.
-        The unit corresponding to `vapor_pressure_data` value. Optional values are ``%``, ``dimensionless``.
+        Use ``%`` for percentages or ``dimensionless`` for fractions.
     pressure_data_units: :py:class:`str <str>`.
         The unit corresponding to `pressure_data` value. Optional values are `hPa`, `Pa`, `mbar`.
-    A: :py:class:`float <float>`.
-        Psychrometer coefficients.
+    A: float or None.
+        Psychrometer coefficient in inverse degrees Celsius. By default it is
+        0.000662 for water and 0.000584 for ice, as for a ventilated psychrometer.
 
         +-----------------------------------------+---------------------------------+-------------------------------+
         | Psychrometer Type and Ventilation Rate  | Wet Bulb Unfrozen (10^-3/°C^-1) | Wet Bulb Frozen (10^-3/°C^-1) |
@@ -79,21 +115,32 @@ def calc_wet_bulb_temperature_iteration(
         +-----------------------------------------+---------------------------------+-------------------------------+
         | Cylindrical Psychrometer (0.4 m/s)      | 0.815                           | 0.719                         |
         +-----------------------------------------+---------------------------------+-------------------------------+
-        | Chinese Spherical Psychrometer (0.8 m/s)| 0.7949                          | 0.7949                        |
+        | Chinese Spherical Psychrometer (0.8 m/s)| 0.7947                          | 0.7947                        |
         +-----------------------------------------+---------------------------------+-------------------------------+
 
     tolerance: :py:class:`float <float>`.
-        Minimum acceptable deviation of the iterated value from the true value.
-    max_iter: :py:class:`int <float>`.
-        Maximum number of iterations.
+        Upper bound on the temperature error in °C. The solver also requires a vapor-pressure residual no greater than 1e-6 hPa.
+    max_iter: :py:class:`int <int>`.
+        Maximum number of Newton updates.
     method : {"easyclimate-backend","easyclimate-rust"}
-        Backend implementation.
+        Native backend. Installed versions without the checked solver use a Python implementation of the same equation.
+    phase : {"water", "ice"}
+        Surface of the wet bulb. Use ``water`` for a liquid-covered bulb,
+        including supercooled water, and ``ice`` for an ice-covered bulb.
+        The ice saturation formula is valid from −65 °C to 0 °C.
 
 
     Returns
     ---------------
     tw: :py:class:`xarray.DataArray<xarray.DataArray>` ( :math:`\\mathrm{degC}` )
-        Wet-bulb temperature
+        Wet-bulb temperature. Missing inputs propagate as NaN.
+
+    Raises
+    ------
+    ValueError
+        If an input is invalid or ``phase="ice"`` has no solution at or below 0 °C.
+    RuntimeError
+        If the solver fails to converge within `max_iter` updates.
 
     Examples
     ----------------
@@ -108,8 +155,8 @@ def calc_wet_bulb_temperature_iteration(
         >>> rh = xr.DataArray(np.array([50, 60, 70]), dims=['point'])
         >>> pressure = xr.DataArray(np.array([1000, 950, 900]), dims=['point'])
 
-        # Calculate wet-bulb potential temperature
-        >>> theta_w = calc_wet_bulb_potential_temperature_iteration(
+        # Calculate wet-bulb temperature
+        >>> tw = calc_wet_bulb_temperature_iteration(
         ...     temperature_data=temp,
         ...     relative_humidity_data=rh,
         ...     pressure_data=pressure,
@@ -122,11 +169,13 @@ def calc_wet_bulb_temperature_iteration(
         >>> temp_2d = xr.DataArray(np.random.rand(10, 10) * 30, dims=['lat', 'lon'])
         >>> rh_2d = xr.DataArray(np.random.rand(10, 10) * 100, dims=['lat', 'lon'])
         >>> pres_2d = xr.DataArray(np.random.rand(10, 10) * 200 + 800, dims=['lat', 'lon'])
-        >>> theta_w_2d = calc_wet_bulb_potential_temperature_iteration(
+        >>> tw_2d = calc_wet_bulb_temperature_iteration(
         ...     temp_2d, rh_2d, pres_2d, "celsius", "%", "hPa"
         ... )
 
     .. seealso::
+        - GB/T 35226—2017, Specifications for surface meteorological observation, Annex A. https://www.cma.gov.cn/zfxxgk/gknr/flfgbz/bz/202209/P020220921690227925675.pdf
+        - WMO No. 8, Guide to Instruments and Methods of Observation, Volume I, Annex 4.B. https://amc.namem.gov.mn/wp-content/uploads/WMO/1.%208_I-2023_en.pdf
         - Fan, J. (1987). Determination of the Psychrometer Coefficient A of the WMO Reference Psychrometer by Comparison with a Standard Gravimetric Hygrometer. Journal of Atmospheric and Oceanic Technology, 4(1), 239-244. https://journals.ametsoc.org/view/journals/atot/4/1/1520-0426_1987_004_0239_dotpco_2_0_co_2.xml
         - Wang Haijun. (2011). Two Wet-Bulb Temperature Estimation Methods and Error Analysis. Meteorological Monthly (Chinese), 37(4): 497-502. website: http://qxqk.nmc.cn/html/2011/4/20110415.html
         - Cheng Zhi, Wu Biwen, Zhu Baolin, et al, (2011). Wet-Bulb Temperature Looping Iterative Scheme and Its Application. Meteorological Monthly (Chinese), 37(1): 112-115. website: http://qxqk.nmc.cn/html/2011/1/20110115.html
@@ -136,27 +185,35 @@ def calc_wet_bulb_temperature_iteration(
 
         wet_bulk
     """
-    from ...backend import _wet_bulb_temperature, calc_wet_bulb_temperature_rs
+    from ... import backend
 
-    # ----------------------------
-    # 0) basic validation
-    # ----------------------------
+    max_iter = index(max_iter)
     if max_iter <= 0:
         raise ValueError(f"max_iter must be positive, got {max_iter}.")
-    if tolerance <= 0:
-        raise ValueError(f"tolerance must be positive, got {tolerance}.")
-    if A <= 0:
-        raise ValueError(f"A must be positive, got {A}.")
-
+    if not isfinite(tolerance) or tolerance <= 0:
+        raise ValueError(f"tolerance must be finite and positive, got {tolerance}.")
+    if phase not in ("water", "ice"):
+        raise ValueError(f"Unknown phase={phase!r}. Expected 'water' or 'ice'.")
+    ice = phase == "ice"
+    if A is None:
+        A = 0.000584 if ice else 0.000662
+    if not isfinite(A) or A <= 0:
+        raise ValueError(f"A must be finite and positive, got {A}.")
     if method not in ("easyclimate-backend", "easyclimate-rust"):
         raise ValueError(
             f"Unknown method={method!r}. "
             "Expected 'easyclimate-backend' or 'easyclimate-rust'."
         )
 
-    # ----------------------------
-    # 1) unit conversion to working units
-    # ----------------------------
+    use_fortran = method == "easyclimate-backend"
+    if use_fortran:
+        native_module = backend._wet_bulb_temperature
+        checked_name = "wet_bulb_temperature_checked"
+    else:
+        native_module = backend._wet_bulb_temperature_rust
+        checked_name = "calc_wet_bulb_temperature_checked"
+    has_checked_solver = hasattr(native_module, checked_name)
+
     pressure_hpa = transfer_data_multiple_units(
         pressure_data, pressure_data_units, "hPa"
     )
@@ -167,52 +224,40 @@ def calc_wet_bulb_temperature_iteration(
         relative_humidity_data, relative_humidity_data_units, "%"
     )
 
-    # If RH came as dimensionless but transfer function is permissive,
-    # enforce expected scale. (If your transfer already handles this, this is harmless.)
-    if relative_humidity_data_units == "dimensionless":
-        # common convention is [0,1]; convert to %
-        rh_pct = rh_pct * 100.0
-
-    # Clip RH to physical range; helps avoid edge-case divergence
-    rh_pct = rh_pct.clip(min=0.0, max=100.0)
-
-    # Force float64 everywhere to avoid silent float32 propagation
-    temp_degc = temp_degc.astype("float64")
-    rh_pct = rh_pct.astype("float64")
-    pressure_hpa = pressure_hpa.astype("float64")
-
-    # ----------------------------
-    # 2) define scalar kernel (returns scalar, not length-1 array)
-    # ----------------------------
-    if method == "easyclimate-backend":
-
-        def _kernel(t_dry: np.float64, rh: np.float64, p: np.float64) -> np.float64:
-            # NaN propagation
-            if np.isnan(t_dry) or np.isnan(rh) or np.isnan(p):
-                return np.float64(np.nan)
-            return np.float64(
-                _wet_bulb_temperature.wet_bulb_temperature(
-                    t_dry, rh, p, tolerance, A, max_iter
-                )
+    def _kernel(t_dry: float, rh: float, p: float) -> float:
+        if isnan(t_dry) or isnan(rh) or isnan(p):
+            return np.nan
+        if not isfinite(p) or p <= 0:
+            raise ValueError(
+                f"Local air pressure must be finite and positive, got {p} hPa."
             )
-
-    else:
-
-        def _kernel(t_dry: np.float64, rh: np.float64, p: np.float64) -> np.float64:
-            if np.isnan(t_dry) or np.isnan(rh) or np.isnan(p):
-                return np.float64(np.nan)
-            return np.float64(
-                calc_wet_bulb_temperature_rs(t_dry, rh, p, tolerance, A, max_iter)
+        if not isfinite(t_dry) or t_dry <= -237.3 or not isfinite(rh):
+            raise ValueError("Invalid dry-bulb temperature or relative humidity.")
+        ap = A * p
+        if not isfinite(ap) or ap <= 0:
+            raise ValueError(
+                "The product of A and pressure must be finite and positive."
             )
+        rh = min(max(rh, 0.0), 100.0)
+        if not has_checked_solver:
+            return _solve_wet_bulb_fallback(t_dry, rh, p, tolerance, A, max_iter, ice)
+        native_solver = getattr(native_module, checked_name)
+        if not use_fortran:
+            return native_solver(t_dry, rh, p, tolerance, A, max_iter, ice)
+        tw, status = native_solver(t_dry, rh, p, tolerance, A, max_iter, int(ice))
+        if status == 0:
+            return tw
+        if status == 1:
+            raise ValueError("Invalid wet-bulb temperature input")
+        if status == 2:
+            raise ValueError("No ice-bulb solution at or below 0 °C")
+        raise RuntimeError("Wet-bulb temperature did not converge")
 
-    # ----------------------------
-    # 3) vectorize over xarray with a true scalar output
-    # ----------------------------
     tw = xr.apply_ufunc(
         _kernel,
-        temp_degc,
-        rh_pct,
-        pressure_hpa,
+        temp_degc.astype("float64"),
+        rh_pct.astype("float64"),
+        pressure_hpa.astype("float64"),
         input_core_dims=[[], [], []],
         output_core_dims=[[]],
         vectorize=True,
@@ -222,15 +267,13 @@ def calc_wet_bulb_temperature_iteration(
         dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
-    # ----------------------------
-    # 4) metadata
-    # ----------------------------
     tw = tw.rename("tw")
     tw.attrs = {
         "standard_name": "wet_bulb_temperature",
         "long_name": "Wet-bulb temperature",
         "units": "degC",
         "method": method,
+        "phase": phase,
         "tolerance": float(tolerance),
         "max_iter": int(max_iter),
         "A": float(A),
@@ -540,14 +583,19 @@ def calc_wet_bulb_temperature_sadeghi2013(
     relative_humidity_data_units: Literal["%", "dimensionless"],
 ) -> xr.DataArray:
     """
-    Calculate wet-bulb temperature using Sadeghi et. al (2011) empirical formula.
+    Calculate thermodynamic wet-bulb temperature using Sadeghi et al. (2013).
+
+    The method includes the piecewise calibration in Fig. 3 of the paper. It
+    was validated from sea level to 4500 m above mean sea level for dry-bulb
+    temperatures from −17 to 40 °C and relative humidity from 5% to 100%.
+    Dry-bulb temperatures outside the inclusive range [−17, 40] °C yield NaN.
 
     Parameters
     ----------------------
     temperature_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
         Atmospheric temperature.
     height_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
-        The elevation.
+        Elevation above mean sea level. The maximum validated elevation is 4500 m.
     relative_humidity_data: :py:class:`xarray.DataArray<xarray.DataArray>`.
         The relative humidity.
     temperature_data_units: :py:class:`str <str>`.
@@ -555,7 +603,7 @@ def calc_wet_bulb_temperature_sadeghi2013(
     height_data_units: :py:class:`str <str>`.
         The unit corresponding to `height_data` value. Optional values are `m`, `km`.
     relative_humidity_data_units: :py:class:`str <str>`.
-        The unit corresponding to `vapor_pressure_data` value. Optional values are ``%``, ``dimensionless``.
+        The unit of `relative_humidity_data`. Use ``%`` for percentages or ``dimensionless`` for fractions.
 
     Returns
     ----------------------
@@ -573,9 +621,12 @@ def calc_wet_bulb_temperature_sadeghi2013(
     gamma = 0.4 * 0.001  # units: g/(kg K) => g/(g K)
     a = 0.611
 
-    # T_a: dry-bulb temperature (K)
+    # T_a: dry-bulb temperature (°C)
     temperature_data = transfer_data_temperature_units(
         temperature_data, temperature_data_units, "degC"
+    )
+    temperature_data = temperature_data.where(
+        (temperature_data >= -17) & (temperature_data <= 40)
     )
     # H: elevation (m).
     height_data = transfer_data_multiple_units(height_data, height_data_units, "m")
@@ -583,13 +634,12 @@ def calc_wet_bulb_temperature_sadeghi2013(
         relative_humidity_data, relative_humidity_data_units, "dimensionless"
     )
 
-    # saturation vapor pressure
-    e_s_Ta = calc_saturation_vapor_pressure(
-        temperature_data=temperature_data, temperature_data_units="degC"
-    )  # units: hPa
-    # vapor_pressure
-    e_a_Ta = e_s_Ta * relative_humidity_data
-    e_a = transfer_data_multiple_units(e_a_Ta, "hPa", "kPa")
+    # Saturation vapor pressure in kPa (Eq. 5a and Table 1).
+    below_freezing = temperature_data < 0
+    b = xr.where(below_freezing, 17.966, 17.368)
+    c = xr.where(below_freezing, 247.15, 238.88)
+    e_s_ta = a * np.exp(b * temperature_data / (temperature_data + c))
+    e_a = e_s_ta * relative_humidity_data
 
     # see (11)
     lambda_value = 0.0014 * np.exp(0.027 * temperature_data)
@@ -611,7 +661,14 @@ def calc_wet_bulb_temperature_sadeghi2013(
     delta = phi**2 - 4 * lambda_value * psi
 
     # see (8a)
-    tw = (-phi + np.sqrt(delta)) / (2 * lambda_value)
+    wet_bulb_estimate = (-phi + np.sqrt(delta)) / (2 * lambda_value)
+
+    # Calibrate by the sign of the estimated wet-bulb temperature (Fig. 3).
+    tw = xr.where(
+        wet_bulb_estimate < 0,
+        1.011 * wet_bulb_estimate - 0.0419,
+        1.0301 * wet_bulb_estimate - 0.213,
+    )
 
     # clean other attrs
     tw.attrs = dict()

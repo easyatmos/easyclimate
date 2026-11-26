@@ -3,7 +3,7 @@ Wavelet transform
 """
 
 from __future__ import annotations
-from ..backend import wave_signif, wavelet
+from .. import backend as _backend
 import xarray as xr
 import pandas as pd
 import numpy as np
@@ -199,7 +199,7 @@ def calc_timeseries_wavelet_transform(
 
     # ------------------------------------------------
     # Wavelet transform
-    wave, period, scale, coi = wavelet(
+    wave, period, scale, coi = _backend.wavelet(
         timeseries_data_numpy, dt, pad, dj, s0, j1, mother_value, mother_param_value
     )
     power = (np.abs(wave)) ** 2  # Compute wavelet power spectrum
@@ -207,7 +207,7 @@ def calc_timeseries_wavelet_transform(
 
     # ------------------------------------------------
     # Significance levels
-    signif = wave_signif(
+    signif = _backend.wave_signif(
         ([variance]),
         dt=dt,
         sigtest=sigtest_wavelet_value,
@@ -225,7 +225,7 @@ def calc_timeseries_wavelet_transform(
     # ------------------------------------------------
     # Global wavelet spectrum & significance levels
     dof = n - scale  # the -scale corrects for padding at edges
-    global_signif = wave_signif(
+    global_signif = _backend.wave_signif(
         variance,
         dt=dt,
         scale=scale,

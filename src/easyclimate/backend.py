@@ -1,7 +1,12 @@
+"""Lazy access to optional compiled and Python backends."""
+
 import platform
 import os
 import site
 import warnings
+from importlib import import_module
+from importlib.util import find_spec
+from threading import RLock
 import sys
 from pathlib import Path
 
@@ -71,665 +76,370 @@ def _register_windows_dll_directories():
             pass
 
 
-_register_windows_dll_directories()
+_BACKENDS = {
+    "wk_analysis": ("easyclimate_backend.wk_spectra.wk_analysis", None),
+    "matsuno_plot": ("easyclimate_backend.wk_spectra.matsuno_plot", None),
+    "wave_signif": ("easyclimate_backend.wavelet.waveletFunctions", "wave_signif"),
+    "wavelet": ("easyclimate_backend.wavelet.waveletFunctions", "wavelet"),
+    "spharm": ("easyclimate_backend.pyspharm.spharm", None),
+    "VectorWind": ("easyclimate_backend.windspharm.xarray", "VectorWind"),
+    "aeronoskin": ("easyclimate_backend.aerobulk.mod_aerobulk_wrap_noskin", None),
+    "aeroskin": ("easyclimate_backend.aerobulk.mod_aerobulk_wrap_skin", None),
+    "human_index_mod": ("easyclimate_backend.heat_stress.human_index_mod", None),
+    "human_index_mod_old": (
+        "easyclimate_backend.heat_stress.human_index_mod_old",
+        None,
+    ),
+    "_ecl_redfit": ("easyclimate_backend.redfit._ecl_redfit", None),
+    "_ecl_redfit_x": ("easyclimate_backend.redfit._ecl_redfit_x", None),
+    "_vinth2p_dp": ("easyclimate_backend.vinth2p._vinth2p_dp", "vinth2p"),
+    "_vinth2p_ecmwf": ("easyclimate_backend.vinth2p._vinth2p_ecmwf", "vinth2pecmwf"),
+    "_vintp2p_ecmwf": ("easyclimate_backend.vinth2p._vintp2p_ecmwf", "vintp2pecmwf"),
+    "dvibeta_ncl": ("easyclimate_backend.vibeta._vibeta_dp", "dvibeta"),
+    "ddvfidf_ncl": ("easyclimate_backend.rvdv._rvdv", "ddvfidf"),
+    "dvrfidf_ncl": ("easyclimate_backend.rvdv._rvdv", "dvrfidf"),
+    "_wet_bulb_temperature": (
+        "easyclimate_backend.wet_bulb._wet_bulb_temperature",
+        None,
+    ),
+    "_wet_bulb_temperature_rust": ("easyclimate_rust._easyclimate_rust", None),
+    "calc_wet_bulb_temperature_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_wet_bulb_temperature",
+    ),
+    "calc_sphere_laplacian_numpy_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_sphere_laplacian_numpy",
+    ),
+    "calc_sphere_laplacian_conservative_numpy_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_sphere_laplacian_conservative_numpy",
+    ),
+    "calc_detrend_spatial_3d_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_detrend_spatial_3d",
+    ),
+    "calc_detrend_spatial_3d_chunked_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_detrend_spatial_3d_chunked",
+    ),
+    "calc_detrend_spatial_flexible_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "calc_detrend_spatial_flexible",
+    ),
+    "interp1d_linear_core_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "interp1d_linear_core",
+    ),
+    "interp1d_linear_2d_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "interp1d_linear_2d",
+    ),
+    "interp1d_linear_3d_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "interp1d_linear_3d",
+    ),
+    "interp1d_linear_4d_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "interp1d_linear_4d",
+    ),
+    "barnes_rs": ("easyclimate_rust._easyclimate_rust", "barnes"),
+    "barnesS2_rs": ("easyclimate_rust._easyclimate_rust", "barnes_s2"),
+    "radius_mask_2d_rs": ("easyclimate_rust._easyclimate_rust", "radius_mask_2d"),
+    "barnes_numba": ("easyclimate_rust.fastbarnes.interpolation", "barnes"),
+    "barnes_S2_numba": ("easyclimate_rust.fastbarnes.interpolationS2", "barnes_S2"),
+    "kdtree_fastbarnes": ("easyclimate_rust.fastbarnes.util", "kdtree"),
+    "ddvfidf_rs": ("easyclimate_rust._easyclimate_rust", "ddvfidf"),
+    "dvrfidf_rs": ("easyclimate_rust._easyclimate_rust", "dvrfidf"),
+    "ddvfidf_batch_rs": ("easyclimate_rust._easyclimate_rust", "ddvfidf_batch"),
+    "dvrfidf_batch_rs": ("easyclimate_rust._easyclimate_rust", "dvrfidf_batch"),
+    "dvibeta_rs": ("easyclimate_rust._easyclimate_rust", "dvibeta"),
+    "dvibeta_batch": ("easyclimate_rust._easyclimate_rust", "dvibeta_batch"),
+    "dvibeta_batch_sum_norm": (
+        "easyclimate_rust._easyclimate_rust",
+        "dvibeta_batch_sum_norm",
+    ),
+    "VectorWind_rs": ("spectralkernel_rs.ws_xarray", "VectorWind"),
+    "spectral_tool_rs": ("spectralkernel_rs.tool", None),
+    "Spharmt_rs": ("spectralkernel_rs.spharmt_rs", "Spharmt_rs"),
+    "ddvfidf_batch_noreyon_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "ddvfidf_batch_noreyon",
+    ),
+    "dvrfidf_batch_noreyon_rs": (
+        "easyclimate_rust._easyclimate_rust",
+        "dvrfidf_batch_noreyon",
+    ),
+    "dvibeta_batch_noreyon": (
+        "easyclimate_rust._easyclimate_rust",
+        "dvibeta_batch_noreyon",
+    ),
+    "dvibeta_batch_sum_norm_noreyon": (
+        "easyclimate_rust._easyclimate_rust",
+        "dvibeta_batch_sum_norm_noreyon",
+    ),
+    "gill_simulate": ("easyclimate_rust._easyclimate_rust", "gill_simulate"),
+    "xarray_regrid": ("easyclimate_backend.xarray_regrid", None),
+}
 
-# --------------------------------------------
-# Easyclimate-backend Initialize variables
-# --------------------------------------------
+_WRF_EXPORTS = (
+    "xarray_enabled",
+    "disable_xarray",
+    "enable_xarray",
+    "cartopy_enabled",
+    "disable_cartopy",
+    "enable_cartopy",
+    "basemap_enabled",
+    "disable_basemap",
+    "enable_basemap",
+    "pyngl_enabled",
+    "enable_pyngl",
+    "disable_pyngl",
+    "set_cache_size",
+    "get_cache_size",
+    "omp_enabled",
+    "ALL_TIMES",
+    "Constants",
+    "ConversionFactors",
+    "ProjectionTypes",
+    "default_fill",
+    "OMP_SCHED_STATIC",
+    "OMP_SCHED_DYNAMIC",
+    "OMP_SCHED_GUIDED",
+    "OMP_SCHED_AUTO",
+    "destagger",
+    "getvar",
+    "xy",
+    "interp1d",
+    "interp2dxy",
+    "interpz3d",
+    "slp",
+    "tk",
+    "td",
+    "rh",
+    "uvmet",
+    "smooth2d",
+    "cape_2d",
+    "cape_3d",
+    "cloudfrac",
+    "ctt",
+    "dbz",
+    "srhel",
+    "udhel",
+    "avo",
+    "pvo",
+    "eth",
+    "wetbulb",
+    "tvirtual",
+    "omega",
+    "pw",
+    "DiagnosticError",
+    "omp_set_num_threads",
+    "omp_get_num_threads",
+    "omp_get_max_threads",
+    "omp_get_thread_num",
+    "omp_get_num_procs",
+    "omp_in_parallel",
+    "omp_set_dynamic",
+    "omp_get_dynamic",
+    "omp_set_nested",
+    "omp_get_nested",
+    "omp_set_schedule",
+    "omp_get_schedule",
+    "omp_get_thread_limit",
+    "omp_set_max_active_levels",
+    "omp_get_max_active_levels",
+    "omp_get_level",
+    "omp_get_ancestor_thread_num",
+    "omp_get_team_size",
+    "omp_get_active_level",
+    "omp_in_final",
+    "omp_init_lock",
+    "omp_init_nest_lock",
+    "omp_destroy_lock",
+    "omp_destroy_nest_lock",
+    "omp_set_lock",
+    "omp_set_nest_lock",
+    "omp_unset_lock",
+    "omp_unset_nest_lock",
+    "omp_test_lock",
+    "omp_test_nest_lock",
+    "omp_get_wtime",
+    "omp_get_wtick",
+    "interplevel",
+    "vertcross",
+    "interpline",
+    "vinterp",
+    "xy_to_ll",
+    "ll_to_xy",
+    "xy_to_ll_proj",
+    "ll_to_xy_proj",
+    "viewitems",
+    "viewkeys",
+    "viewvalues",
+    "isstr",
+    "py2round",
+    "py3range",
+    "ucode",
+    "to_np",
+    "extract_global_attrs",
+    "is_standard_wrf_var",
+    "extract_dim",
+    "extract_vars",
+    "extract_times",
+    "combine_files",
+    "npbytes_to_str",
+    "is_moving_domain",
+    "is_staggered",
+    "get_left_indexes",
+    "iter_left_indexes",
+    "get_right_slices",
+    "get_proj_params",
+    "from_args",
+    "args_to_list",
+    "arg_location",
+    "psafilepath",
+    "get_id",
+    "from_var",
+    "combine_dims",
+    "either",
+    "get_iterable",
+    "IterWrapper",
+    "is_coordvar",
+    "latlon_coordvars",
+    "is_mapping",
+    "has_time_coord",
+    "is_multi_file",
+    "is_multi_time_req",
+    "get_coord_pairs",
+    "is_time_coord_var",
+    "geo_bounds",
+    "get_cartopy",
+    "get_basemap",
+    "get_pyngl",
+    "cartopy_xlim",
+    "cartopy_ylim",
+    "latlon_coords",
+    "ll_points",
+    "pairs_to_latlon",
+    "GeoBounds",
+    "NullGeoBounds",
+    "WrfProj",
+    "NullProjection",
+    "LambertConformal",
+    "Mercator",
+    "PolarStereographic",
+    "LatLon",
+    "RotatedLatLon",
+    "getproj",
+    "CoordPair",
+    "to_xy_coords",
+    "cache_item",
+    "get_cached_item",
+)
 
-# Initialize variables for backend functions with default values
-spharm = None
-VectorWind = None
-aeronoskin = None
-aeroskin = None
-human_index_mod = None
-human_index_mod_old = None
-_ecl_redfit = None
-_ecl_redfit_x = None
-_vinth2p_dp = None
-_vinth2p_ecmwf = None
-_vintp2p_ecmwf = None
-_wet_bulb_temperature = None
-dvibeta_ncl = None
-dvrfidf_ncl = None
-ddvfidf_ncl = None
-dvrfidf_rs = None
-ddvfidf_rs = None
-dvrfidf_batch_rs = None
-ddvfidf_batch_rs = None
-dvrfidf_batch_noreyon_rs = None
-ddvfidf_batch_noreyon_rs = None
-dvibeta_rs = None
-dvibeta_batch = None
-dvibeta_batch_sum_norm = None
-dvibeta_batch_noreyon = None
-dvibeta_batch_sum_norm_noreyon = None
-barnes_numba = None
-barnes_rs = None
-barnes_S2_numba = None
-barnesS2_rs = None
-radius_mask_2d_rs = None
-kdtree_fastbarnes = None
-gill_simulate = None
+_BACKENDS.update({name: ("easyclimate_backend.wrf", name) for name in _WRF_EXPORTS})
 
-# WRF-related variables with default values
-xarray_enabled = False
-disable_xarray = None
-enable_xarray = None
-cartopy_enabled = False
-disable_cartopy = None
-enable_cartopy = None
-basemap_enabled = False
-disable_basemap = None
-enable_basemap = None
-pyngl_enabled = False
-enable_pyngl = None
-disable_pyngl = None
-set_cache_size = None
-get_cache_size = None
-omp_enabled = False
-ALL_TIMES = None
-Constants = None
-ConversionFactors = None
-ProjectionTypes = None
-default_fill = None
-OMP_SCHED_STATIC = None
-OMP_SCHED_DYNAMIC = None
-OMP_SCHED_GUIDED = None
-OMP_SCHED_AUTO = None
-destagger = None
-getvar = None
-xy = None
-interp1d = None
-interp2dxy = None
-interpz3d = None
-slp = None
-tk = None
-td = None
-rh = None
-uvmet = None
-smooth2d = None
-cape_2d = None
-cape_3d = None
-cloudfrac = None
-ctt = None
-dbz = None
-srhel = None
-udhel = None
-avo = None
-pvo = None
-eth = None
-wetbulb = None
-tvirtual = None
-omega = None
-pw = None
-DiagnosticError = None
-omp_set_num_threads = None
-omp_get_num_threads = None
-omp_get_max_threads = None
-omp_get_thread_num = None
-omp_get_num_procs = None
-omp_in_parallel = None
-omp_set_dynamic = None
-omp_get_dynamic = None
-omp_set_nested = None
-omp_get_nested = None
-omp_set_schedule = None
-omp_get_schedule = None
-omp_get_thread_limit = None
-omp_set_max_active_levels = None
-omp_get_max_active_levels = None
-omp_get_level = None
-omp_get_ancestor_thread_num = None
-omp_get_team_size = None
-omp_get_active_level = None
-omp_in_final = None
-omp_init_lock = None
-omp_init_nest_lock = None
-omp_destroy_lock = None
-omp_destroy_nest_lock = None
-omp_set_lock = None
-omp_set_nest_lock = None
-omp_unset_lock = None
-omp_unset_nest_lock = None
-omp_test_lock = None
-omp_test_nest_lock = None
-omp_get_wtime = None
-omp_get_wtick = None
-interplevel = None
-vertcross = None
-interpline = None
-vinterp = None
-xy_to_ll = None
-ll_to_xy = None
-xy_to_ll_proj = None
-ll_to_xy_proj = None
-viewitems = None
-viewkeys = None
-viewvalues = None
-isstr = None
-py2round = None
-py3range = None
-ucode = None
-to_np = None
-extract_global_attrs = None
-is_standard_wrf_var = None
-extract_dim = None
-extract_vars = None
-extract_times = None
-combine_files = None
-npbytes_to_str = None
-is_moving_domain = None
-is_staggered = None
-get_left_indexes = None
-iter_left_indexes = None
-get_right_slices = None
-get_proj_params = None
-from_args = None
-args_to_list = None
-arg_location = None
-psafilepath = None
-get_id = None
-from_var = None
-combine_dims = None
-either = None
-get_iterable = None
-IterWrapper = None
-is_coordvar = None
-latlon_coordvars = None
-is_mapping = None
-has_time_coord = None
-is_multi_file = None
-is_multi_time_req = None
-get_coord_pairs = None
-is_time_coord_var = None
-geo_bounds = None
-get_cartopy = None
-get_basemap = None
-get_pyngl = None
-cartopy_xlim = None
-cartopy_ylim = None
-latlon_coords = None
-ll_points = None
-pairs_to_latlon = None
-GeoBounds = None
-NullGeoBounds = None
-WrfProj = None
-NullProjection = None
-LambertConformal = None
-Mercator = None
-PolarStereographic = None
-LatLon = None
-RotatedLatLon = None
-getproj = None
-CoordPair = None
-to_xy_coords = None
-cache_item = None
-get_cached_item = None
-
-# --------------------------------------------
-# Easyclimate-rust Initialize variables
-# --------------------------------------------
-RUST_AVAILABLE = False
-calc_wet_bulb_temperature_rs = None
-calc_sphere_laplacian_numpy_rs = None
-calc_sphere_laplacian_conservative_numpy_rs = None
-calc_detrend_spatial_3d_rs = None
-calc_detrend_spatial_3d_chunked_rs = None
-calc_detrend_spatial_flexible_rs = None
-interp1d_linear_core_rs = None
-interp1d_linear_2d_rs = None
-interp1d_linear_3d_rs = None
-interp1d_linear_4d_rs = None
-VectorWind_rs = None
-
-# --------------------------------------------
-# Easyclimate-backend Import
-# --------------------------------------------
-
-# Cross platform module - these should work on all platforms
-try:
-    from easyclimate_backend.wk_spectra import wk_analysis, matsuno_plot
-    from easyclimate_backend.wavelet.waveletFunctions import wave_signif, wavelet
-except ImportError as e:
-    warnings.warn(
-        f"Failed to import cross-platform modules: {e}. Some core functionality will be disabled.",
-        ImportWarning,
-    )
-
-    # Define fallbacks for cross-platform modules
-    def wk_analysis(*args, **kwargs):
-        raise ImportError("wk_analysis is not available due to import failure")
-
-    def matsuno_plot(*args, **kwargs):
-        raise ImportError("matsuno_plot is not available due to import failure")
-
-    def wave_signif(*args, **kwargs):
-        raise ImportError("wave_signif is not available due to import failure")
-
-    def wavelet(*args, **kwargs):
-        raise ImportError("wavelet is not available due to import failure")
+_PACKAGES = {
+    "easyclimate_backend": "easyclimate-backend",
+    "easyclimate_rust": "easyclimate-rust",
+    "spectralkernel_rs": "spectralkernel-rs",
+}
+_LOAD_LOCK = RLock()
+_dll_directories_registered = False
 
 
-def _warn_backend_import(module_name, exc):
-    warnings.warn(
-        f"Failed to import {module_name}: {exc}. Related functionality will be disabled.",
-        ImportWarning,
-    )
-    print(f"Detailed import error for {module_name}: {exc}", file=sys.stderr)
+class BackendUnavailableError(ImportError):
+    """An optional backend is missing, incompatible, or cannot be loaded."""
 
 
-# Attempt to import platform-specific functions on supported platforms
-if CURRENT_PLATFORM in SUPPORTED_BACKEND_PLATFORMS:
-    try:
-        from easyclimate_backend.pyspharm import spharm
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.pyspharm", e)
-
-    try:
-        from easyclimate_backend.windspharm.xarray import VectorWind
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.windspharm.xarray", e)
-
-    try:
-        from easyclimate_backend.aerobulk import mod_aerobulk_wrap_noskin as aeronoskin
-        from easyclimate_backend.aerobulk import mod_aerobulk_wrap_skin as aeroskin
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.aerobulk", e)
-
-    try:
-        from easyclimate_backend.heat_stress import human_index_mod, human_index_mod_old
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.heat_stress", e)
-
-    try:
-        from easyclimate_backend.redfit import _ecl_redfit
-        from easyclimate_backend.redfit import _ecl_redfit_x
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.redfit", e)
-
-    try:
-        from easyclimate_backend.vinth2p._vinth2p_dp import vinth2p as _vinth2p_dp
-        from easyclimate_backend.vinth2p._vinth2p_ecmwf import (
-            vinth2pecmwf as _vinth2p_ecmwf,
-        )
-        from easyclimate_backend.vinth2p._vintp2p_ecmwf import (
-            vintp2pecmwf as _vintp2p_ecmwf,
-        )
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.vinth2p", e)
-
-    try:
-        from easyclimate_backend.vibeta._vibeta_dp import dvibeta as dvibeta_ncl
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.vibeta", e)
-
-    try:
-        from easyclimate_backend.rvdv._rvdv import (
-            ddvfidf as ddvfidf_ncl,
-            dvrfidf as dvrfidf_ncl,
-        )
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.rvdv", e)
-
-    try:
-        from easyclimate_backend.wet_bulb import _wet_bulb_temperature
-    except Exception as e:
-        _warn_backend_import("easyclimate_backend.wet_bulb", e)
-
-    if (
-        spharm is None
-        and VectorWind is None
-        and aeronoskin is None
-        and aeroskin is None
-        and human_index_mod is None
-        and _ecl_redfit is None
-        and _vinth2p_dp is None
-        and dvibeta_ncl is None
-        and ddvfidf_ncl is None
-        and _wet_bulb_temperature is None
-    ):
+def _warn_missing_backends():
+    # Only inspect top-level packages: finding a dotted module may import its parent.
+    missing = []
+    for module, package in _PACKAGES.items():
+        if module in sys.modules:
+            installed = sys.modules[module] is not None
+        else:
+            try:
+                installed = find_spec(module) is not None
+            except (ImportError, ValueError):
+                installed = False
+        if not installed:
+            missing.append(package)
+    if missing:
         warnings.warn(
-            f"Failed to import all easyclimate-backend platform modules on {CURRENT_PLATFORM}. "
-            "Check that easyclimate-backend is installed with compatible binary dependencies.",
-            ImportWarning,
+            "Optional EasyClimate backends are not installed: "
+            + ", ".join(missing)
+            + ". Other functionality remains available. Install with: python -m pip install "
+            + " ".join(missing)
+            + ". Backend loading is deferred until use.",
+            UserWarning,
+            stacklevel=2,
         )
 
-    # Attempt to import WRF-related modules - handle separately, as WRF may have additional dependencies
+
+def require(name):
+    """Load and cache a backend symbol, with actionable dependency errors.
+
+    Successful loads are cached; failed loads can be retried. Exceptions raised
+    by the computation itself are never intercepted here.
+    """
+    global _dll_directories_registered
+    if name not in _BACKENDS:
+        raise AttributeError(f"Unknown EasyClimate backend symbol: {name!r}")
+    with _LOAD_LOCK:
+        if name in globals():
+            return globals()[name]
+        module_name, attribute = _BACKENDS[name]
+        package = _PACKAGES[module_name.split(".")[0]]
+        if not _dll_directories_registered:
+            _register_windows_dll_directories()
+            _dll_directories_registered = True
+        try:
+            module = import_module(module_name)
+            value = module if attribute is None else getattr(module, attribute)
+        except ModuleNotFoundError as exc:
+            root_module = module_name.split(".")[0]
+            if exc.name == root_module:
+                message = (
+                    f"Backend symbol '{name}' requires {package}. "
+                    f"Install it in the current Python environment: python -m pip install {package}"
+                )
+            else:
+                message = (
+                    f"Cannot load backend symbol '{name}' from {package}: "
+                    f"module '{exc.name}' is missing. Check {package}'s installation "
+                    f"and its dependencies. Original error: {exc}"
+                )
+            raise BackendUnavailableError(message) from exc
+        except (ImportError, OSError, AttributeError, ValueError) as exc:
+            raise BackendUnavailableError(
+                f"Cannot load backend symbol '{name}' from {package}. "
+                "Check that its version, Python/NumPy ABI and native runtime libraries "
+                f"are compatible with this environment. Original error: {exc}"
+            ) from exc
+        globals()[name] = value
+        return value
+
+
+def is_available(name):
+    """Check a specific capability on demand, including binary loadability."""
     try:
-        from easyclimate_backend.wrf import (
-            xarray_enabled,
-            disable_xarray,
-            enable_xarray,
-            cartopy_enabled,
-            disable_cartopy,
-            enable_cartopy,
-            basemap_enabled,
-            disable_basemap,
-            enable_basemap,
-            pyngl_enabled,
-            enable_pyngl,
-            disable_pyngl,
-            set_cache_size,
-            get_cache_size,
-            omp_enabled,
-            ALL_TIMES,
-            Constants,
-            ConversionFactors,
-            ProjectionTypes,
-            default_fill,
-            OMP_SCHED_STATIC,
-            OMP_SCHED_DYNAMIC,
-            OMP_SCHED_GUIDED,
-            OMP_SCHED_AUTO,
-            destagger,
-            getvar,
-            xy,
-            interp1d,
-            interp2dxy,
-            interpz3d,
-            slp,
-            tk,
-            td,
-            rh,
-            uvmet,
-            smooth2d,
-            cape_2d,
-            cape_3d,
-            cloudfrac,
-            ctt,
-            dbz,
-            srhel,
-            udhel,
-            avo,
-            pvo,
-            eth,
-            wetbulb,
-            tvirtual,
-            omega,
-            pw,
-            DiagnosticError,
-            omp_set_num_threads,
-            omp_get_num_threads,
-            omp_get_max_threads,
-            omp_get_thread_num,
-            omp_get_num_procs,
-            omp_in_parallel,
-            omp_set_dynamic,
-            omp_get_dynamic,
-            omp_set_nested,
-            omp_get_nested,
-            omp_set_schedule,
-            omp_get_schedule,
-            omp_get_thread_limit,
-            omp_set_max_active_levels,
-            omp_get_max_active_levels,
-            omp_get_level,
-            omp_get_ancestor_thread_num,
-            omp_get_team_size,
-            omp_get_active_level,
-            omp_in_final,
-            omp_init_lock,
-            omp_init_nest_lock,
-            omp_destroy_lock,
-            omp_destroy_nest_lock,
-            omp_set_lock,
-            omp_set_nest_lock,
-            omp_unset_lock,
-            omp_unset_nest_lock,
-            omp_test_lock,
-            omp_test_nest_lock,
-            omp_get_wtime,
-            omp_get_wtick,
-            interplevel,
-            vertcross,
-            interpline,
-            vinterp,
-            xy_to_ll,
-            ll_to_xy,
-            xy_to_ll_proj,
-            ll_to_xy_proj,
-            viewitems,
-            viewkeys,
-            viewvalues,
-            isstr,
-            py2round,
-            py3range,
-            ucode,
-            to_np,
-            extract_global_attrs,
-            is_standard_wrf_var,
-            extract_dim,
-            extract_vars,
-            extract_times,
-            combine_files,
-            npbytes_to_str,
-            is_moving_domain,
-            is_staggered,
-            get_left_indexes,
-            iter_left_indexes,
-            get_right_slices,
-            get_proj_params,
-            from_args,
-            args_to_list,
-            arg_location,
-            psafilepath,
-            get_id,
-            from_var,
-            combine_dims,
-            either,
-            get_iterable,
-            IterWrapper,
-            is_coordvar,
-            latlon_coordvars,
-            is_mapping,
-            has_time_coord,
-            is_multi_file,
-            is_multi_time_req,
-            get_coord_pairs,
-            is_time_coord_var,
-            geo_bounds,
-            get_cartopy,
-            get_basemap,
-            get_pyngl,
-            cartopy_xlim,
-            cartopy_ylim,
-            latlon_coords,
-            ll_points,
-            pairs_to_latlon,
-            GeoBounds,
-            NullGeoBounds,
-            WrfProj,
-            NullProjection,
-            LambertConformal,
-            Mercator,
-            PolarStereographic,
-            LatLon,
-            RotatedLatLon,
-            getproj,
-            CoordPair,
-            to_xy_coords,
-            cache_item,
-            get_cached_item,
-        )
-
-        # print("Successfully imported WRF modules", file=sys.stderr)
-
-    except ImportError as wrf_e:
-        warnings.warn(
-            f"Failed to import WRF-related modules: {wrf_e}. WRF functionality will be disabled.",
-            ImportWarning,
-        )
-        print(f"Detailed WRF import error: {wrf_e}", file=sys.stderr)
-
-else:
-    warnings.warn(
-        f"easyclimate-backend modules is not supported on {CURRENT_PLATFORM}. Related functionality will be disabled."
-    )
+        require(name)
+    except BackendUnavailableError:
+        return False
+    return True
 
 
-# Define some basic fallback functions
-def _dummy_function(*args, **kwargs):
-    """A dummy function that raises an informative error when called."""
-    raise ImportError(
-        "This function is not available because easyclimate-backend modules failed to import. "
-        f"Check that easyclimate-backend is properly installed on {CURRENT_PLATFORM}."
-    )
+def __getattr__(name):
+    # Backward compatibility for callers importing individual backend symbols.
+    if name == "RUST_AVAILABLE":
+        return is_available("calc_detrend_spatial_3d_rs")
+    return require(name)
 
 
-# If the import of some key functions fails, replace them with fallback functions.
-if spharm is None:
-    spharm = _dummy_function
+def __dir__():
+    return sorted(set(globals()) | set(_BACKENDS) | {"RUST_AVAILABLE"})
 
-if VectorWind is None:
-    VectorWind = _dummy_function
 
-if _wet_bulb_temperature is None:
-    _wet_bulb_temperature = _dummy_function
-
-# For the WRF function, if it is None, set it to the fallback function.
-if getvar is None:
-    getvar = _dummy_function
-
-if interplevel is None:
-    interplevel = _dummy_function
-
-# Print the summary of the import status
-if CURRENT_PLATFORM in SUPPORTED_BACKEND_PLATFORMS:
-    if all(func is not None for func in [spharm, VectorWind, getvar]):
-        # print("easyclimate-backend modules imported successfully", file=sys.stderr)
-        pass
-    else:
-        print("Some easyclimate-backend modules failed to import", file=sys.stderr)
-
-# --------------------------------------------
-# Easyclimate-rust Import
-# --------------------------------------------
-
-# Attempt to import platform-specific functions on supported platforms
-if CURRENT_PLATFORM in SUPPORTED_BACKEND_PLATFORMS:
-    try:
-        # print(
-        #     f"Attempting to import easyclimate-rust modules on {CURRENT_PLATFORM}...",
-        #     file=sys.stderr,
-        # )
-
-        # Import basic modules
-
-        # wet_bulb module
-        from easyclimate_rust._easyclimate_rust import (
-            calc_wet_bulb_temperature as calc_wet_bulb_temperature_rs,
-        )
-
-        # sphere_laplacian module (NumPy interface)
-        from easyclimate_rust._easyclimate_rust import (
-            calc_sphere_laplacian_numpy as calc_sphere_laplacian_numpy_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            calc_sphere_laplacian_conservative_numpy as calc_sphere_laplacian_conservative_numpy_rs,
-        )
-
-        # detrend_spatial module - high-performance spatial detrending
-        from easyclimate_rust._easyclimate_rust import (
-            calc_detrend_spatial_3d as calc_detrend_spatial_3d_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            calc_detrend_spatial_3d_chunked as calc_detrend_spatial_3d_chunked_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            calc_detrend_spatial_flexible as calc_detrend_spatial_flexible_rs,
-        )
-
-        # interp1d
-        from easyclimate_rust._easyclimate_rust import (
-            interp1d_linear_core as interp1d_linear_core_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            interp1d_linear_2d as interp1d_linear_2d_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            interp1d_linear_3d as interp1d_linear_3d_rs,
-        )
-        from easyclimate_rust._easyclimate_rust import (
-            interp1d_linear_4d as interp1d_linear_4d_rs,
-        )
-
-        # fastbarnes
-        from easyclimate_rust._easyclimate_rust import (
-            barnes as barnes_rs,
-            barnes_s2 as barnesS2_rs,
-            radius_mask_2d as radius_mask_2d_rs,
-        )
-        from easyclimate_rust.fastbarnes.interpolation import (
-            barnes as barnes_numba,
-        )
-        from easyclimate_rust.fastbarnes.interpolationS2 import (
-            barnes_S2 as barnes_S2_numba,
-        )
-        from easyclimate_rust.fastbarnes.util import (
-            kdtree as kdtree_fastbarnes,
-        )
-
-        # rvdv
-        from easyclimate_rust._easyclimate_rust import (
-            ddvfidf as ddvfidf_rs,
-            dvrfidf as dvrfidf_rs,
-            ddvfidf_batch as ddvfidf_batch_rs,
-            dvrfidf_batch as dvrfidf_batch_rs,
-        )
-
-        try:
-            from easyclimate_rust._easyclimate_rust import (
-                ddvfidf_batch_noreyon as ddvfidf_batch_noreyon_rs,
-                dvrfidf_batch_noreyon as dvrfidf_batch_noreyon_rs,
-            )
-        except ImportError:
-            pass
-
-        # vibeta
-        from easyclimate_rust._easyclimate_rust import (
-            dvibeta as dvibeta_rs,
-            dvibeta_batch,
-            dvibeta_batch_sum_norm,
-        )
-
-        try:
-            from easyclimate_rust._easyclimate_rust import (
-                dvibeta_batch_noreyon,
-                dvibeta_batch_sum_norm_noreyon,
-            )
-        except ImportError:
-            pass
-
-        # Gill Model
-        try:
-            from easyclimate_rust._easyclimate_rust import (
-                gill_simulate,
-            )
-        except ImportError:
-            pass
-
-        # spectralkernel_rs
-        from spectralkernel_rs.ws_xarray import VectorWind as VectorWind_rs
-        from spectralkernel_rs import tool as spectral_tool_rs
-        from spectralkernel_rs.spharmt_rs import Spharmt_rs
-
-        # print(
-        #     "Successfully imported basic easyclimate-rust modules", file=sys.stderr
-        # )
-
-        RUST_AVAILABLE = True
-
-    except ImportError as e:
-        warnings.warn(
-            f"Failed to import basic easyclimate-rust modules: {e}. Some functionality will be disabled.",
-            ImportWarning,
-        )
-        # Record detailed error information to stderr
-        print(f"Detailed import error for basic modules: {e}", file=sys.stderr)
-
-        RUST_AVAILABLE = False
-else:
-    warnings.warn(
-        f"easyclimate-rust modules is not supported on {CURRENT_PLATFORM}. Related functionality will be disabled."
-    )
+_warn_missing_backends()

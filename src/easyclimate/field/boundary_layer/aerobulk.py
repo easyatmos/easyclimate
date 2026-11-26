@@ -93,7 +93,7 @@ The focus in AeroBulk is readability, efficiency, and portability towards modern
 *Fig 2/ Comparison of the neutral drag (thick lines) and evaporation coefficients (thinner lines) as a function of the neutral wind speed at 10m.*
 """
 
-from ...backend import aeronoskin, aeroskin
+from ... import backend as _backend
 import numpy as np
 import xarray as xr
 import warnings
@@ -288,7 +288,7 @@ def calc_turbulent_fluxes_without_skin_correction(
         )
 
         ql, qh, taux, tauy, evap = (
-            aeronoskin.mod_aerobulk_wrapper_noskin.aerobulk_model_noskin(
+            _backend.aeronoskin.mod_aerobulk_wrapper_noskin.aerobulk_model_noskin(
                 algorithm,
                 height_for_temperature_specific_humidity,
                 height_for_wind,
@@ -516,7 +516,7 @@ def calc_turbulent_fluxes_skin_correction(
         )
 
         ql, qh, taux, tauy, t_s, evap = (
-            aeroskin.mod_aerobulk_wrapper_skin.aerobulk_model_skin(
+            _backend.aeroskin.mod_aerobulk_wrapper_skin.aerobulk_model_skin(
                 algorithm,
                 height_for_temperature_specific_humidity,
                 height_for_wind,

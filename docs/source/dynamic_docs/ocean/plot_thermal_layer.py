@@ -1,151 +1,260 @@
 # -*- coding: utf-8 -*-
 """
 Thermocline Depth and 20°C Isotherm Depth
-=========================================================================================================
+=========================================
 
-The ocean's thermocline is a critical feature of the global marine environment,
-representing a distinct layer where water temperature decreases rapidly with depth.
-This transition zone separates the warm, well-mixed surface layer (typically heated by solar radiation) from the colder,
-denser deep ocean below. In the equatorial Pacific—an area central to global climate dynamics
-due to its role in phenomena like El Niño-Southern Oscillation (ENSO)—the thermocline’s depth
-(often referred to as the Depth of the Thermocline Core, DTC) is a key parameter.
-It influences heat distribution, nutrient upwelling, and air-sea interactions,
-making its accurate characterization essential for climate modeling and prediction.
+The thermocline core is the depth of strongest vertical cooling. For depth
+increasing downward, it corresponds to the most negative vertical temperature
+gradient. D20 is the depth at which the profile reaches 20°C. It is often used
+as a proxy for the thermocline core in the equatorial Pacific, where the 20°C
+isotherm often lies in the main thermocline.
 
-Traditionally, the thermocline depth (DTC) is formally defined as the depth where the vertical temperature gradient :math:`\mathrm{d}T/\mathrm{d}z` is maximized,
-denoted as :math:`Z_{tc}`. This definition captures the core of the thermocline, where the most significant temperature change occurs.
-However, directly calculating :math:`Z_{tc}` requires high-resolution vertical temperature profiles,
-which are often sparse or computationally intensive to process. Moreover,
-in regions like the western Pacific warm pool—where surface waters are persistently warm and temperature gradients are relatively weak—:math:`Z_{tc}`
-can be ambiguous or difficult to identify. These limitations have spurred the search for a simpler yet
-reliable proxy to represent the thermocline depth in the equatorial Pacific.
-
-A widely adopted solution is the 20°C isotherm depth :math:`Z_{20}`—the depth at which the water temperature equals 20°C.
-Over decades of oceanographic research, :math:`Z_{20}` has emerged as a robust and practical proxy for :math:`Z_{tc}` in the equatorial Pacific.
-Here's why it has gained such prominence:
-
-- **Proximity to the Main Thermocline Core**:The 20°C isotherm lies near the center of the *main thermocline* in the equatorial Pacific. This region, where temperature decreases most sharply, is the thermocline's dynamical heart. By aligning with this core, :math:`Z_{20}` naturally captures the thermocline's vertical structure, making it a physically meaningful indicator.
-- **Consistency with :math:`Z_{tc}`**: In most parts of the equatorial Pacific (excluding the warm pool), :math:`Z_{20}` and :math:`Z_{tc}` overlap closely. Observational data show that the depth of the 20°C isotherm closely tracks the depth of maximum vertical temperature gradient. This congruence ensures that :math:`Z_{20}` reliably reflects :math:`Z_{tc}` without sacrificing accuracy, even in regions where :math:`Z_{tc}` might be operationally hard to define.
-- **Practicality in Analysis**: Beyond its physical relevance, :math:`Z_{20}` offers practical advantages. It simplifies the study of ocean dynamics by approximating the tropical Pacific as a *two-layer system*: a warm upper layer above 20°C and a colder deep layer below. This approximation facilitates analysis of processes like equatorial wave propagation (e.g., Kelvin and Rossby waves) and heat transport, which are critical to ENSO variability. Additionally, :math:`Z_{20}` aligns with isopycnal (constant density) surfaces, allowing researchers to link temperature structure to ocean circulation without complex 3D calculations.
-- **Dynamical Consistency in Steady Climates**: In a climate with a stable mean state (i.e., time-averaged conditions), using :math:`Z_{20}` as a proxy for :math:`Z_{tc}` introduces no significant dynamical inconsistency. This stability has been validated across multiple studies, confirming that :math:`Z_{20}` captures the same large-scale variations in thermocline depth as :math:`Z_{tc}`, whether during El Niño, La Niña, or neutral conditions.
-
-The 20°C isotherm depth :math:`Z_{20}` has become a cornerstone of equatorial Pacific thermocline research.
-Its proximity to the thermocline core, consistency with the traditional :math:`Z_{tc}` definition, analytical simplicity,
-and dynamical reliability make it an indispensable tool for climate scientists.
-By bridging the gap between theoretical definitions and practical applications,
-:math:`Z_{20}` enhances our ability to model and predict climate variability in one of the ocean's most climatically active regions.
-As ocean observing systems continue to advance, :math:`Z_{20}` remains a testament to the power of finding elegant,
-physically grounded proxies in complex Earth system science.
+This example compares two methods for each diagnostic on the same monthly
+potential temperature field from SODA 3.4.2 in August 2020.
 
 .. seealso::
 
-    - Yang, H., & Wang, F. (2009). Revisiting the Thermocline Depth in the Equatorial Pacific. Journal of Climate, 22(13), 3856-3863. https://doi.org/10.1175/2009JCLI2836.1
-
-Before proceeding with all the steps, first import some necessary libraries and packages
+    - Yang, H., & Wang, F. (2009). Revisiting the Thermocline Depth in the
+      Equatorial Pacific. https://doi.org/10.1175/2009JCLI2836.1
+    - Carton, J. A., Chepurin, G. A., & Chen, L. (2018). SODA3: A New Ocean
+      Climate Reanalysis. https://doi.org/10.1175/JCLI-D-18-0149.1
 """
-import numpy as np
-import xarray as xr
-import easyclimate as ecl
+
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
+import numpy as np
+
+import easyclimate as ecl
 
 # %%
-# Preprocessed data
+# Load the August 2020 temperature sample
+# ---------------------------------------
+# This example uses a losslessly compressed, single-month sample with the
+# original global grid and all 50 depth levels. The depth coordinate is in
+# meters and increases downward.
 #
-#
-# .. code-block:: python
-#
-#     temper_data = xr.open_dataset('temp_soda3.4.2_mn_ocean_reg_2020_EN4.nc', chunks="auto").temp.rename({'st_ocean': 'depth'})
+# :func:`easyclimate.open_tutorial_dataset` downloads the sample on first use
+# and reuses the cached copy on subsequent runs.
 #
 # .. tip::
 #
-#   You can download following datasets here:
+#    :download:`Download the full 2020 SODA temperature dataset <https://huggingface.co/datasets/shenyulu/easyclimate/resolve/main/tutorial_data/temp_soda3.4.2_mn_ocean_reg_2020_EN4.nc>`
 #
-#   - :download:`Download temp_soda3.4.2_mn_ocean_reg_2020_EN4.nc <https://huggingface.co/datasets/shenyulu/easyclimate/resolve/main/tutorial_data/temp_soda3.4.2_mn_ocean_reg_2020_EN4.nc>`
+#    After downloading the full file, open all 12 months with:
 #
+#    .. code-block:: python
 #
-# .. warning::
+#        import xarray as xr
 #
-#     - Here we are using only the `SODA <https://www2.atmos.umd.edu/~ocean/>`__ 3.4.2 reanalysis data during 2024; the actual analysis will need to be analyzed using multiple years of data.
-#     - **Citation**: Carton, J. A., Chepurin, G. A., & Chen, L. (2018). SODA3: A New Ocean Climate Reanalysis. Journal of Climate, 31(17), 6967-6983. https://doi.org/10.1175/JCLI-D-18-0149.1
-#
-# First calculate 20°C isotherm depth (D20) through :py:func:`easyclimate.field.ocean.thermal.calc_D20_depth <easyclimate.field.ocean.thermal.calc_D20_depth>`
-#
-# .. code-block:: python
-#
-#     D20_result = ecl.field.ocean.calc_D20_depth(temper_data).isel(time = 7)
-#     D20_result.to_netcdf("sample_D20_result.nc")
-#
-# Then open the dataset
-D20_result = ecl.open_tutorial_dataset("sample_D20_result")["__xarray_dataarray_variable__"]
+#        dataset = xr.open_dataset(
+#            "temp_soda3.4.2_mn_ocean_reg_2020_EN4.nc", chunks="auto"
+#        )
+#        temperature_2020 = dataset.temp.rename(st_ocean="depth")
+
+with ecl.open_tutorial_dataset("sample_soda_temperature_202008") as dataset:
+    temperature = dataset.temp.isel(time=0, drop=True)
+    temperature = temperature.rename(st_ocean="depth").load()
 
 # %%
-# Then we use :py:func:`easyclimate.field.ocean.calc_seawater_thermocline_depth <easyclimate.field.ocean.calc_seawater_thermocline_depth>` to calculate the depth of thermocline
+# Compare the shallowest and deepest 20°C crossings
+# -------------------------------------------------
+# :func:`easyclimate.field.ocean.calc_D20_depth` uses linear interpolation
+# between adjacent valid levels that straddle 20°C. Exact hits use the sampled
+# depth. Profiles with no crossing or exact hit return NaN and appear white.
 #
-# .. code-block:: python
+# * ``method="shallowest"`` (default) selects the first crossing from the surface.
+# * ``method="deepest"`` selects the last crossing. Temperature inversions can
+#   lead to multiple crossings in a profile.
 #
-#     thermocline_result = ecl.field.ocean.calc_seawater_thermocline_depth(temper_data).isel(time = 7)
-#     thermocline_result.to_netcdf("sample_thermocline_result.nc")
-#
-# Next, we open the result of thermocline
-thermocline_result = ecl.open_tutorial_dataset("sample_thermocline_result").depth
+# The two panels share a color scale. Each red ring in the right panel marks
+# a grid cell whose temperature profile reaches 20°C at more than one distinct
+# depth. The left panel shows the shallowest of those depths and the right panel
+# shows the deepest. The blue diamond marks the profile plotted below.
+
+d20_shallow = ecl.field.ocean.calc_D20_depth(temperature, method="shallowest")
+d20_deep = ecl.field.ocean.calc_D20_depth(temperature, method="deepest")
+d20_deep.plot()
 
 # %%
-# Here's the ocean thermocline depth distribution for August 2020
-proj_trans = ccrs.PlateCarree()
-fig, ax = ecl.plot.quick_draw_spatial_basemap(central_longitude=180)
+geographic = ccrs.PlateCarree()
 
-ax.add_feature(cfeature.LAND, facecolor = '#DDDDDD', zorder = 1)
 
-fg = thermocline_result.plot(
-    vmax = 1000, vmin = 0,
-    cmap = "viridis_r",
-    transform = ccrs.PlateCarree(),
-    add_colorbar=False,
-    zorder = 0,
+def plot_maps(fields, titles, *, label, cmap, vmin, vmax, extend="neither"):
+    fig, axes = ecl.plot.quick_draw_spatial_basemap(
+        2, 1, figsize=(6, 6), central_longitude=180
+    )
+    for ax, field, title in zip(axes, fields, titles):
+        ax.set_extent([0.1, 359.9, -82, 89], crs=geographic)
+        ax.add_feature(cfeature.LAND, facecolor="#dddddd", zorder=1)
+        mesh = field.plot.pcolormesh(
+            ax=ax,
+            transform=geographic,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            add_colorbar=False,
+        )
+        ax.set_title(title)
+    fig.colorbar(
+        mesh,
+        ax=axes,
+        orientation="vertical",
+        pad=0.05,
+        label=label,
+        extend=extend,
+        shrink=0.9,
+    )
+    return fig, axes
+
+
+# %%
+fig, axes = plot_maps(
+    (d20_shallow, d20_deep),
+    ("D20 · Shallowest crossing", "D20 · Deepest crossing"),
+    label="Depth (m)",
+    cmap="viridis_r",
+    vmin=0,
+    vmax=600,
 )
-cb1 = fig.colorbar(fg, ax = ax, orientation = 'horizontal', pad = 0.15, extendrect = True)
-cb1.set_label('')
 
-ax.set_title("Thermocline (Aug., 2020)")
+depth_difference = d20_deep - d20_shallow
+different = (depth_difference > 0).transpose("lat", "lon")
+lat_index, lon_index = np.where(different.values)
+axes[1].scatter(
+    different.lon.values[lon_index],
+    different.lat.values[lat_index],
+    transform=geographic,
+    s=24,
+    facecolors="none",
+    edgecolors="red",
+    zorder=3,
+    label="Multiple 20°C depths",
+)
+
+profile_index = depth_difference.argmax(dim=["lat", "lon"])
+profile = temperature.isel(profile_index)
+axes[1].scatter(
+    float(profile.lon),
+    float(profile.lat),
+    transform=geographic,
+    marker="D",
+    s=26,
+    color="#225a9c",
+    edgecolors="white",
+    zorder=4,
+    label="Profile shown below",
+)
+axes[1].legend(loc="lower left", fontsize=8)
 
 # %%
-# And the 20°C isotherm depth (D20) distribution for August 2020
-proj_trans = ccrs.PlateCarree()
-fig, ax = ecl.plot.quick_draw_spatial_basemap(central_longitude=180)
+# Inspect a profile with multiple 20°C crossings
+# ----------------------------------------------
+# The blue diamond marks the grid cell with the largest separation between
+# the two D20 estimates in this example. Small dots show the sampled SODA
+# levels, and the dashed vertical line shows 20°C. The colored markers show
+# the two interpolated depths. The depth axis increases downward.
 
-ax.add_feature(cfeature.LAND, facecolor = '#DDDDDD', zorder = 1)
+shallow_depth = float(d20_shallow.isel(profile_index))
+deep_depth = float(d20_deep.isel(profile_index))
+last_level = profile.get_index("depth").searchsorted(deep_depth, side="right")
+upper_profile = profile.isel(depth=slice(None, last_level + 1))
 
-fg = D20_result.plot(
-    vmax = 1000, vmin = 0,
-    cmap = "viridis_r",
-    transform = ccrs.PlateCarree(),
-    add_colorbar=False,
-    zorder = 0,
-)
-cb1 = fig.colorbar(fg, ax = ax, orientation = 'horizontal', pad = 0.15, extendrect = True)
-cb1.set_label('')
-
-ax.set_title("D20 (Aug., 2020)")
 
 # %%
-# Finally we make a difference between them, and from the figure we can see that the difference is minimum in the equatorial region,
-# meaning that in the equatorial tropics we can consider D20 to approximate the depth of the thermocline.
+fig, ax = plt.subplots(figsize=(3, 6), layout="constrained")
 
-# sphinx_gallery_thumbnail_number = -1
-proj_trans = ccrs.PlateCarree()
-fig, ax = ecl.plot.quick_draw_spatial_basemap(central_longitude=180)
-
-ax.add_feature(cfeature.LAND, facecolor = '#DDDDDD', zorder = 1)
-
-fg = (D20_result - thermocline_result).plot(
-    vmax = 200,
-    transform = ccrs.PlateCarree(),
-    add_colorbar=False,
-    zorder = 0,
+ax.plot(
+    upper_profile.values,
+    upper_profile.depth.values,
+    color="#364152",
+    marker=".",
+    label="SODA temperature profile",
 )
-cb1 = fig.colorbar(fg, ax = ax, orientation = 'horizontal', pad = 0.15, extendrect = True)
-cb1.set_label('')
+ax.axvline(20, color="0.45", linestyle="--", label="20°C")
 
-ax.set_title("Diff (Aug., 2020)")
+ax.scatter(
+    20,
+    shallow_depth,
+    color="#007b72",
+    zorder=3,
+    label=f"Shallowest: {shallow_depth:.1f} m",
+)
+ax.scatter(
+    20,
+    deep_depth,
+    color="#c44e10",
+    zorder=3,
+    label=f"Deepest: {deep_depth:.1f} m",
+)
+
+latitude = float(profile.lat)
+longitude = (float(profile.lon) + 180) % 360 - 180
+lat_label = f"{abs(latitude):g}°{'N' if latitude >= 0 else 'S'}"
+lon_label = f"{abs(longitude):g}°{'E' if longitude >= 0 else 'W'}"
+
+ax.set_title(f"Temperature profile at ({lat_label}, {lon_label})")
+ax.set_xlabel("Potential temperature (°C)")
+ax.set_ylabel("Depth (m)")
+
+ax.invert_yaxis()
+ax.grid(alpha=0.25)
+ax.legend(
+    loc="center", bbox_to_anchor=(0.5, -0.33), shadow=False, ncol=1, frameon=False
+)
+
+# %%
+# Compare two estimates of the maximum cooling depth
+# --------------------------------------------------
+# :func:`easyclimate.field.ocean.calc_seawater_thermocline_depth` selects the
+# strongest cooling rate in each profile.
+#
+# * ``method="layer"`` (default) computes the temperature drop divided by the
+#   depth spacing between adjacent valid levels. It returns the midpoint of
+#   the interval with the largest cooling rate.
+# * ``method="centered"`` estimates the derivative at each sampled level,
+#   accounting for unequal spacing. It uses one-sided differences at the
+#   ends of the depth coordinate and returns a sampled depth.
+#
+# Both methods search the full water column and return NaN when there is no
+# positive cooling rate. At high latitudes the strongest cooling in a
+# profile can occur below 1,000 m. The upper end of the colorbar includes
+# values beyond the plotted scale.
+
+thermocline_layer = ecl.field.ocean.calc_seawater_thermocline_depth(
+    temperature, method="layer"
+)
+thermocline_centered = ecl.field.ocean.calc_seawater_thermocline_depth(
+    temperature, method="centered"
+)
+thermocline_centered.plot()
+
+# %%
+plot_maps(
+    (thermocline_layer, thermocline_centered),
+    ("Thermocline · Layer midpoint", "Thermocline · Centered derivative"),
+    label="Depth (m)",
+    cmap="viridis_r",
+    vmin=0,
+    vmax=1000,
+    extend="max",
+)
+
+# %%
+# Compare differences in depth
+# ----------------------------
+# In the left panel, positive values mean the centered method places the
+# thermocline deeper than the layer method. In the right panel, positive
+# values mean the 20°C isotherm is deeper than the layer-based thermocline.
+# The latter difference is shown where both depths are defined.
+
+# sphinx_gallery_thumbnail_number = 5
+plot_maps(
+    (thermocline_centered - thermocline_layer, d20_shallow - thermocline_layer),
+    ("Centered − layer thermocline", "Shallowest D20 − layer thermocline"),
+    label="Depth difference (m)",
+    cmap="RdBu_r",
+    vmin=-150,
+    vmax=150,
+    extend="both",
+)

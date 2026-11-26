@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from ....backend import gill_simulate
+from .... import backend as _backend
 
 import numpy as np
 import xarray as xr
@@ -217,7 +217,7 @@ def simulate(
         gill_symmetric_heating
     """
 
-    raw = gill_simulate(
+    raw = _backend.gill_simulate(
         case=case,
         t=t,
         nt=nt,

@@ -9,7 +9,7 @@ from ...core.units import (
     transfer_data_temperature_units,
     transfer_data_multiple_units,
 )
-from ...backend import human_index_mod, human_index_mod_old
+from ... import backend as _backend
 
 __all__ = [
     "calc_apparent_temperature",
@@ -73,7 +73,7 @@ def calc_apparent_temperature(
 
     # core function
     def _apptemp(t, vp, w10):
-        val = human_index_mod.apptemp(t, vp, w10)
+        val = _backend.human_index_mod.apptemp(t, vp, w10)
         return np.asarray(val).item()
 
     # apply_ufunc
@@ -135,7 +135,7 @@ def calc_simplified_human_discomfort_index(
 
     # core function
     def _dis_coi(t, vp):
-        val = human_index_mod.dis_coi(t, vp)
+        val = _backend.human_index_mod.dis_coi(t, vp)
         return np.asarray(val).item()
 
     # apply_ufunc
@@ -205,7 +205,7 @@ def calc_simplified_human_discomfort_index_stull(
 
     # core function
     def _dis_cois(t, twb, rh):
-        val = human_index_mod.dis_cois(t, twb, rh)
+        val = _backend.human_index_mod.dis_cois(t, twb, rh)
         return np.asarray(val).item()
 
     # apply_ufunc
@@ -266,7 +266,7 @@ def calc_swamp_cooler_temperatures(
 
     # core function
     def _swampcooleff(t, twb):
-        val1, val2 = human_index_mod.swampcooleff(t, twb)
+        val1, val2 = _backend.human_index_mod.swampcooleff(t, twb)
         return np.array([val1, val2])
 
     # apply_ufunc
@@ -342,7 +342,7 @@ def calc_heat_thic_thip(
 
     # core function
     def _thindex(t, twb):
-        val1, val2 = human_index_mod.thindex(t, twb)
+        val1, val2 = _backend.human_index_mod.thindex(t, twb)
         return np.array([val1, val2])
 
     # apply_ufunc
@@ -407,7 +407,7 @@ def calc_simplified_wbgt_index(
 
     # core function
     def _swbgt(t, vp):
-        val = human_index_mod.swbgt(t, vp)
+        val = _backend.human_index_mod.swbgt(t, vp)
         return np.asarray(val).item()
 
     # apply_ufunc
@@ -468,7 +468,7 @@ def calc_human_feels_temperature(
 
     # core function
     def _hmdex(t_c, vp):
-        val = human_index_mod.hmdex(t_c, vp)
+        val = _backend.human_index_mod.hmdex(t_c, vp)
         return np.asarray(val).item()
 
     # apply_ufunc

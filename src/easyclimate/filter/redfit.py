@@ -14,7 +14,7 @@ from typing import Literal
 from pathlib import Path
 from contextlib import contextmanager
 
-from ..backend import _ecl_redfit, _ecl_redfit_x
+from .. import backend as _backend
 
 __all__ = ["calc_redfit", "calc_redfit_cross"]
 
@@ -394,7 +394,7 @@ def calc_redfit(
         cfg_array = (c_char * 80)(*padded)
 
         # 调用Fortran子例程
-        _ecl_redfit.run_redfit(cfg_array)
+        _backend._ecl_redfit.run_redfit(cfg_array)
 
         # Read data
         # 读取生成数据
@@ -801,7 +801,7 @@ def calc_redfit_cross(
         cfg_array = (c_char * 80)(*padded)
 
         # 调用Fortran子例程
-        _ecl_redfit_x.run_redfit_x(cfg_array)
+        _backend._ecl_redfit_x.run_redfit_x(cfg_array)
 
         # Read data -gxx
         # 读取生成数据 gxx
