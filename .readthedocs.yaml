@@ -6,10 +6,20 @@ build:
     python: "3.12"
   apt_packages:
     - optipng
+  jobs:
+    post_checkout:
+      - >-
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+          git fetch --unshallow --tags;
+        else
+          git fetch --tags;
+        fi
 
 python:
   install:
     - requirements: docs/requirements.txt
+    - method: pip
+      path: .
 
 sphinx:
   configuration: docs/source/conf.py

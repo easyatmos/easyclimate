@@ -35,6 +35,7 @@ jobs:
       - name: Install dependencies 💻
         run: |
           pip install -r docs/requirements.txt
+          python -m pip install --no-deps -e .
 
       - name: make the sphinx docs
         run: |

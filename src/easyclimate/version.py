@@ -1,5 +1,9 @@
-# src/easyclimate/version.py
-__version__ = "2026.12.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("easyclimate")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 
 
 def show_versions() -> str:

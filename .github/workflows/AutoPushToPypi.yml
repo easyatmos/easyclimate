@@ -24,6 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r test_requirements.txt
+          python -m pip install --no-deps -e .
 
       - name: Run unit tests
         run: pytest --mpl --mpl-baseline-path="test/baseline_images" --cov src
@@ -49,10 +50,32 @@ jobs:
           pip install -r release_requirements.txt
 
       - name: Build package
+        run: python -m build --no-isolation
+
+      - name: Verify package versions match release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          python -m build --wheel --no-isolation
-          python -m build --no-isolation --sdist .
-          python setup.py clean --all
+          python - <<'PY'
+          from os import environ
+          from pathlib import Path
+
+          from packaging.utils import parse_sdist_filename, parse_wheel_filename
+
+          expected_version = environ["RELEASE_TAG"].removeprefix("v")
+          dist = Path("dist")
+          for pattern, parse_filename in (
+              ("*.whl", parse_wheel_filename),
+              ("*.tar.gz", parse_sdist_filename),
+          ):
+              artifacts = list(dist.glob(pattern))
+              if len(artifacts) != 1:
+                  raise SystemExit(f"Expected one {pattern} in {dist}, got {artifacts}")
+              artifact = artifacts[0]
+              version = parse_filename(artifact.name)[1]
+              if str(version) != expected_version:
+                  raise SystemExit(f"{artifact.name} has version {version}, expected {expected_version}")
+          PY
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
