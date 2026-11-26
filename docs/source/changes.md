@@ -1,20 +1,30 @@
 # Changelog♻️
 
+## v2026.12.0
+
+*Released on: 2026/11/26*
+
+- [feat: add tnflux vertical+3d](https://github.com/easyatmos/easyclimate/pull/136/commits/7fa08682686848c794c875891808e836146ce749)
+- [feat: better backend import](https://github.com/easyatmos/easyclimate/pull/136/commits/6a3243a1df042631272f737a00d277d42d54001e)
+- [feat: add agent rules](https://github.com/easyatmos/easyclimate/pull/136/commits/0235375f721741d21f8ec727f83b7cebd51b68ab)
+- [fix: fix wet bulb error](https://github.com/easyatmos/easyclimate/pull/136/commits/2bebe065e515053285f347d89398d264ca28a5a1)
+- [feat: add daystat](https://github.com/easyatmos/easyclimate/pull/136/commits/e38a7ad8d0697dcce16d2f393d32a42f7502b105)
+- [feat: seperate regriding](https://github.com/easyatmos/easyclimate/pull/136/commits/e6130a3cd5f94e81c4ddd31074418a8f2b91ce54)
+- [fix: thermal layer calculation](https://github.com/easyatmos/easyclimate/pull/136/commits/55b94c9f4f0f5f2800ed9199c4e1f351bc553e60)
+- [update: update relay](https://github.com/easyatmos/easyclimate/pull/136/commits/5372379106cbee3d1afa61e5a83bd094d9ee6387)
+
+**Full Changelog**: https://github.com/easyatmos/easyclimate/compare/v2026.10.0...v2026.12.0
+
 ## v2026.10.0
 
 *Released on: 2026/10/13*
 
 - [fix: integral import](https://github.com/easyatmos/easyclimate/pull/133/commits/c4db6fcd7fa3cf67450560da6ef5c1a8d5593cb2)
-
 - [fix: adv varname change](https://github.com/easyatmos/easyclimate/pull/133/commits/d238417ba132f913b45a22dc5db8ca7a7350986a)
-
 - [feat: add gill model](https://github.com/easyatmos/easyclimate/pull/133/commits/91c9f1885c953b7fdb4a396239ebc2b340b23eb6)
-
 - [fix: cartopy 0.26.0 error](https://github.com/easyatmos/easyclimate/pull/133/commits/1bfbf63a66bf7ee1430c80039e9aaff0a3d164d7)
-
 - [fix: plot change](https://github.com/easyatmos/easyclimate/pull/133/commits/b669b4dbd9ef029a7443f1635aabdbd601ac8a99)
-
-- docs: improve CONTRIBUTING guide and fix minor issues by @Ncard00123 in https://github.com/easyatmos/easyclimate/pull/134
+- [docs: improve CONTRIBUTING guide and fix minor issues](https://github.com/easyatmos/easyclimate/pull/134) by @Ncard00123
 
 ### New Contributors
 - @Ncard00123 made their first contribution in https://github.com/easyatmos/easyclimate/pull/134
@@ -26,9 +36,7 @@
 *Released on: 2026/7/8*
 
 - [feat: add spec](https://github.com/easyatmos/easyclimate/pull/127/commits/80a6a0c5f2732c8168d04399850aeb5628fa1706)
-
 - [update: move easyatmos](https://github.com/easyatmos/easyclimate/pull/127/commits/ba72448b909aa7d082e539723da2dc621fdec6e9)
-
 - [fix: remove gsw_xarray & oceans relay](https://github.com/easyatmos/easyclimate/pull/127/commits/da71b50a9746ecb64c1a07feca65b1550239f444)
 
 **Full Changelog**: https://github.com/easyatmos/easyclimate/compare/v2026.6.0...v2026.7.0
